@@ -1,0 +1,69 @@
+# =============================================================================
+# Fiche vélo BikeFit — config/bikes/mon_clm.yaml
+# Giant Trinity Advanced Pro 2 (2018) — Taille M
+# =============================================================================
+# Les champs marqués A_MESURER sont à relever directement sur le vélo.
+# Convention : toutes les longueurs en millimètres, angles en degrés.
+
+identite:
+  marque: Giant
+  modele: Trinity Advanced Pro 2
+  annee: 2018
+  taille: M
+  numero_serie: null            # optionnel, sous le boîtier de pédalier
+
+geometrie:
+  # Générationnellement identique 2016-2021 pour ce cadre (source: geometrygeeks)
+  stack_mm: 539
+  reach_mm: 417
+  # Le Trinity a une tige de selle à recul réversible : angle effectif variable
+  angle_tube_selle_deg: null    # A_MESURER selon position du chariot (env. 76-78)
+
+transmission:
+  # ⚠️ Donnée la plus critique du fitting : lis la valeur gravée à l'intérieur
+  # de la manivelle (165 / 170 / 172.5 / 175)
+  longueur_manivelles_mm: A_MESURER
+  groupe: Shimano Ultegra
+  plateaux: [52, 36]            # à vérifier sur ton exemplaire
+
+peripheriques:
+  selle:
+    modele: A_MESURER           # ex. Giant Contact SLR Fwd (monte d'origine 2018)
+    longueur_rails_utiles_mm: A_MESURER   # plage de coulissement avant/arrière
+  tige_de_selle:
+    type: Trinity Composite (profil aero, chariot reversible)
+    positions_chariot: [avant, arriere]   # inverse le déport → 2 plages de recul
+  poste_de_pilotage:
+    type: Giant Trinity basebar + extensions
+    reglages:
+      hauteur_pads: A_MESURER             # nb d'entretoises dispo + plage en mm
+      longueur_extensions: A_MESURER
+      inclinaison_extensions_deg: A_MESURER
+      ecartement_pads_mm: A_MESURER
+  pedales:
+    modele: A_MESURER
+    cales: A_MESURER
+
+roues:
+  diametre_jante_mm: 622        # 700c — référence de calibration de secours
+  pneu_arriere: A_MESURER       # section (ex. 25c) → diamètre total pour l'échelle
+
+# -----------------------------------------------------------------------------
+# Plages de réglage admissibles — pour la détection de butées par le moteur
+# de recommandation. Mesure une fois la course totale de chaque réglage.
+# -----------------------------------------------------------------------------
+plages_reglage:
+  hauteur_selle_mm:   {min: A_MESURER, max: A_MESURER}
+  recul_selle_mm:     {min: A_MESURER, max: A_MESURER}  # par position de chariot
+  hauteur_pads_mm:    {min: A_MESURER, max: A_MESURER}
+  longueur_ext_mm:    {min: A_MESURER, max: A_MESURER}
+
+# -----------------------------------------------------------------------------
+# Setup courant (sera versionné par session en Phase 3 — première saisie ici)
+# -----------------------------------------------------------------------------
+setup_actuel:
+  date: 2026-08-04
+  hauteur_selle_mm: A_MESURER   # axe pédalier → creux de selle, le long du tube
+  recul_selle_mm: A_MESURER     # pointe de selle → verticale de l'axe pédalier
+  drop_selle_pads_mm: A_MESURER # difference de hauteur selle → pads
+  position_chariot: A_MESURER   # avant / arriere

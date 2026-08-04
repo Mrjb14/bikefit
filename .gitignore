@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Données volumineuses / générées
+*.mp4
+*.mov
+*.avi
+!tests/data/*.mp4
+spike_output/
+cache/
+*.parquet
+*.sqlite
+*.db
+
+# Rapports générés
+reports/
+*.html
+!src/bikefit/report/templates/*.html
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,13 @@
+# Plages cibles position contre-la-montre (degrés)
+# Sources classiques de bike fitting ; à affiner avec l'expérience terrain.
+profil: agressif   # confort | agressif
+
+angles:
+  genou_extension_pmb: {min: 140, max: 150}   # point mort bas
+  genou_flexion_pmh:   {min: 68, max: 78}     # point mort haut
+  hanche_fermee:       {min: 45, max: 55}     # tronc-fémur au passage haut
+  tronc_horizontale:   {min: 8, max: 20}
+  coude:               {min: 90, max: 110}
+
+regles:
+  degres_par_10mm_selle: 3.0   # approx. de départ, affinée par la géométrie mesurée
