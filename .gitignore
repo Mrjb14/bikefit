@@ -25,6 +25,9 @@ reports/
 *.html
 !src/bikefit/report/templates/*.html
 
+# Conf Perso
+config/bikes/*
+
 # OS / IDE
 .DS_Store
 .idea/
