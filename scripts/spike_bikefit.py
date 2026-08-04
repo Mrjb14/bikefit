@@ -27,6 +27,7 @@ Critère de succès du spike :
 import argparse
 import json
 import sys
+import urllib.request
 from pathlib import Path
 
 import cv2
@@ -36,6 +37,27 @@ try:
     import mediapipe as mp
 except ImportError:
     sys.exit("MediaPipe manquant : pip install mediapipe")
+
+# ---------------------------------------------------------------------------
+# Modèle MediaPipe Tasks (téléchargé automatiquement si absent)
+# ---------------------------------------------------------------------------
+MODEL_DIR = Path(__file__).parent.parent / "models"
+MODEL_PATH = MODEL_DIR / "pose_landmarker_heavy.task"
+MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "pose_landmarker/pose_landmarker_heavy/float16/latest/"
+    "pose_landmarker_heavy.task"
+)
+
+
+def ensure_model() -> Path:
+    if not MODEL_PATH.exists():
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"Téléchargement du modèle MediaPipe ({MODEL_URL}) ...")
+        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+        print(f"Modèle enregistré dans {MODEL_PATH}")
+    return MODEL_PATH
+
 
 # ---------------------------------------------------------------------------
 # Landmarks MediaPipe Pose (indices officiels)
@@ -70,7 +92,7 @@ ANGLES = {
 
 # Plages cibles indicatives en position CLM (pour affichage seulement)
 TARGETS = {
-    "genou": (70, 150),     # min PMH ~70-75, max PMB ~140-150
+    "genou": (70, 150),
     "hanche": (40, 110),
     "coude": (90, 110),
 }
@@ -89,7 +111,7 @@ def angle_3pts(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
 def trunk_angle(shoulder: np.ndarray, hip: np.ndarray) -> float:
     """Angle du tronc par rapport à l'horizontale, en degrés (0 = à plat)."""
     v = shoulder - hip
-    # Attention : axe y de l'image pointe vers le bas
+    # Axe y de l'image pointe vers le bas
     return float(np.degrees(np.arctan2(-(v[1]), abs(v[0]))))
 
 
@@ -99,8 +121,6 @@ def main() -> None:
     parser.add_argument("--side", choices=["right", "left"], default="right",
                         help="Côté du corps face à la caméra (défaut: right)")
     parser.add_argument("--output-dir", type=Path, default=Path("spike_output"))
-    parser.add_argument("--model-complexity", type=int, choices=[0, 1, 2], default=2,
-                        help="0=rapide, 2=précis (défaut: 2)")
     args = parser.parse_args()
 
     if not args.video.exists():
@@ -124,10 +144,18 @@ def main() -> None:
         cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height),
     )
 
-    pose = mp.solutions.pose.Pose(
-        model_complexity=args.model_complexity,
-        smooth_landmarks=True,
-        min_detection_confidence=0.5,
+    # --- MediaPipe Tasks API (v1.0+)
+    model_path = ensure_model()
+    PoseLandmarker = mp.tasks.vision.PoseLandmarker
+    PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
+    BaseOptions = mp.tasks.BaseOptions
+    VisionRunningMode = mp.tasks.vision.RunningMode
+
+    options = PoseLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=str(model_path)),
+        running_mode=VisionRunningMode.VIDEO,
+        min_pose_detection_confidence=0.5,
+        min_pose_presence_confidence=0.5,
         min_tracking_confidence=0.5,
     )
 
@@ -135,69 +163,72 @@ def main() -> None:
     angle_rows: list[dict] = []
     frame_idx = 0
 
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
+    with PoseLandmarker.create_from_options(options) as landmarker:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
 
-        result = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            timestamp_ms = int(frame_idx * 1000 / fps)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-        if result.pose_landmarks:
-            lms = result.pose_landmarks.landmark
-            pts: dict[str, np.ndarray] = {}
-            vis: dict[str, float] = {}
-            for name, idx in lm_ids.items():
-                lm = lms[idx]
-                pts[name] = np.array([lm.x * width, lm.y * height])
-                vis[name] = lm.visibility
+            if result.pose_landmarks:
+                lms = result.pose_landmarks[0]  # premier individu détecté
+                pts: dict[str, np.ndarray] = {}
+                vis: dict[str, float] = {}
+                for name, idx in lm_ids.items():
+                    lm = lms[idx]
+                    pts[name] = np.array([lm.x * width, lm.y * height])
+                    vis[name] = lm.visibility
 
-            # --- enregistrement landmarks bruts
-            row = {"frame": frame_idx, "t": frame_idx / fps}
-            for name in lm_ids:
-                row[f"{name}_x"] = round(pts[name][0], 2)
-                row[f"{name}_y"] = round(pts[name][1], 2)
-                row[f"{name}_vis"] = round(vis[name], 3)
-            landmark_rows.append(row)
+                # --- enregistrement landmarks bruts
+                row: dict = {"frame": frame_idx, "t": frame_idx / fps}
+                for name in lm_ids:
+                    row[f"{name}_x"] = round(pts[name][0], 2)
+                    row[f"{name}_y"] = round(pts[name][1], 2)
+                    row[f"{name}_vis"] = round(vis[name], 3)
+                landmark_rows.append(row)
 
-            # --- angles
-            arow = {"frame": frame_idx, "t": frame_idx / fps}
-            for aname, (pa, pb, pc) in ANGLES.items():
-                arow[aname] = round(angle_3pts(pts[pa], pts[pb], pts[pc]), 1)
-            arow["tronc"] = round(trunk_angle(pts["shoulder"], pts["hip"]), 1)
-            angle_rows.append(arow)
+                # --- angles
+                arow: dict = {"frame": frame_idx, "t": frame_idx / fps}
+                for aname, (pa, pb, pc) in ANGLES.items():
+                    arow[aname] = round(angle_3pts(pts[pa], pts[pb], pts[pc]), 1)
+                arow["tronc"] = round(trunk_angle(pts["shoulder"], pts["hip"]), 1)
+                angle_rows.append(arow)
 
-            # --- dessin squelette
-            for p1, p2 in SKELETON:
-                c1 = tuple(pts[p1].astype(int))
-                c2 = tuple(pts[p2].astype(int))
-                cv2.line(frame, c1, c2, (0, 255, 0), 3)
-            for name, p in pts.items():
-                low_vis = vis[name] < 0.6
-                color = (0, 0, 255) if low_vis else (0, 200, 255)
-                cv2.circle(frame, tuple(p.astype(int)), 7, color, -1)
+                # --- dessin squelette
+                for p1, p2 in SKELETON:
+                    c1 = tuple(pts[p1].astype(int))
+                    c2 = tuple(pts[p2].astype(int))
+                    cv2.line(frame, c1, c2, (0, 255, 0), 3)
+                for name, p in pts.items():
+                    low_vis = vis[name] < 0.6
+                    color = (0, 0, 255) if low_vis else (0, 200, 255)
+                    cv2.circle(frame, tuple(p.astype(int)), 7, color, -1)
 
-            # --- affichage angles à l'écran
-            y0 = 40
-            for aname in ("genou", "hanche", "coude", "tronc"):
-                val = arow[aname]
-                txt = f"{aname}: {val:.0f} deg"
-                cv2.putText(frame, txt, (20, y0),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5)
-                cv2.putText(frame, txt, (20, y0),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
-                y0 += 40
-        else:
-            cv2.putText(frame, "POSE NON DETECTEE", (20, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
+                # --- affichage angles à l'écran
+                y0 = 40
+                for aname in ("genou", "hanche", "coude", "tronc"):
+                    val = arow[aname]
+                    txt = f"{aname}: {val:.0f} deg"
+                    cv2.putText(frame, txt, (20, y0),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5)
+                    cv2.putText(frame, txt, (20, y0),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+                    y0 += 40
+            else:
+                cv2.putText(frame, "POSE NON DETECTEE", (20, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
 
-        writer.write(frame)
-        frame_idx += 1
-        if frame_idx % 100 == 0:
-            print(f"  frame {frame_idx}/{n_frames}")
+            writer.write(frame)
+            frame_idx += 1
+            if frame_idx % 100 == 0:
+                print(f"  frame {frame_idx}/{n_frames}")
 
     cap.release()
     writer.release()
-    pose.close()
 
     if not angle_rows:
         sys.exit("Aucune pose détectée sur toute la vidéo. "
@@ -264,7 +295,6 @@ def main() -> None:
         print(f"  {aname:10s} {s['min']:6.1f} / {s['max']:6.1f} / "
               f"{s['moyenne']:6.1f} ± {s['ecart_type']:.1f}{tstr}")
 
-    knee = summary["angles"].get("genou", {})
     print("\nVerdict :")
     hip_knee_ankle_ok = all(
         summary["visibilite_moyenne"].get(n, 0) > 0.8
@@ -275,6 +305,7 @@ def main() -> None:
     else:
         print("  ⚠️  Détection fragile. Pistes : plus de lumière, fond uni,")
         print("     marqueurs contrastés sur les articulations, caméra plus proche.")
+    knee = summary["angles"].get("genou", {})
     if knee and knee.get("ecart_type", 0) < 5:
         print("  ⚠️  L'angle du genou varie peu : pédalais-tu pendant la capture ?")
 

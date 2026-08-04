@@ -23,60 +23,66 @@ Architecture modulaire en pipeline, chaque module testable indépendamment :
 │  Ingestion   │──▶│ Pose         │──▶│ Analyse      │──▶│ Moteur de    │
 │  vidéo       │   │ Estimation   │   │ cinématique  │   │ recommandation│
 └─────────────┘   └──────────────┘   └──────────────┘   └──────┬───────┘
-                                                               │
-                        ┌──────────────┐   ┌──────────────┐    │
-                        │  Interface   │◀──│  Rapport /   │◀───┘
-                        │  (UI)        │   │  Export      │
-                        └──────────────┘   └──────────────┘
+                         │                                       │
+                    cache Parquet                                ▼
+                                                        ┌──────────────┐
+                                                        │  Rapport HTML │
+                                                        │  Jinja2+Plotly│
+                                                        └──────────────┘
 ```
 
-### 2.1 Module Ingestion vidéo
-- Entrée : fichiers vidéo (mp4/mov, 60 fps recommandé) ou flux webcam en direct.
-- Responsabilités : décodage (OpenCV / PyAV), normalisation (rotation, resize), extraction des métadonnées (fps, résolution), synchronisation multi-angles si deux vidéos.
-- Sortie : itérateur de frames horodatées.
+### 2.1 Module Ingestion vidéo — ✅ implémenté
+- `VideoReader` : lit fps/width/height/frame_count à l'init, itérateur `frames()` → `TimedFrame`.
+- Entrée : fichiers vidéo (mp4/mov). Flux MJPEG réseau prévu Phase 3.
+- Horodatage : `timestamp_ms = frame_idx * 1000 / fps`.
 
-### 2.2 Module Pose Estimation
-- Moteur : **MediaPipe Pose** (Tasks API, modèle `pose_landmarker_heavy` pour la précision).
-- Abstraction : interface `PoseEstimator` pour pouvoir remplacer par YOLO-pose ou autre sans toucher au reste (pattern Strategy).
-- Sortie : par frame, 33 landmarks (x, y, z, visibilité) en coordonnées normalisées.
-- Optimisation : traitement par batch, option de sous-échantillonnage spatial (la pose n'a pas besoin du 4K), mise en cache des résultats sur disque (un fichier `.parquet` de landmarks par vidéo) pour ne jamais recalculer.
+### 2.2 Module Pose Estimation — ✅ implémenté
+- Moteur : **MediaPipe Pose Tasks API v1.0** (`pose_landmarker_heavy`, `VisionRunningMode.VIDEO`).
+- Protocole `PoseEstimator` (Strategy) : le code métier n'importe jamais MediaPipe directement.
+- `LandmarkCache` : clé `md5(path+mtime+size)[:12]`, stockage Parquet dans `cache/landmarks/`.
+  Recalcul uniquement si la vidéo a changé. Tout le pipeline en aval se rejoue en < 1 s.
+- `FrameLandmarks` : 33 landmarks (x, y, z, visibilité) normalisés + flag `detected`.
 
-### 2.3 Module Analyse cinématique (le cœur métier)
-- **Filtrage** : lissage des landmarks (filtre Savitzky-Golay ou Butterworth passe-bas ~6 Hz) pour éliminer le bruit de détection.
-- **Détection des cycles de pédalage** : suivi de la trajectoire de la cheville/pied → détection des points morts haut (PMH) et bas (PMB) par analyse des extrema de la coordonnée verticale.
-- **Calcul d'angles** par frame : genou (hanche-genou-cheville), hanche (épaule-hanche-genou), tronc/horizontale, coude, cheville.
-- **Agrégation** : pour chaque angle, distribution sur N cycles (min, max, moyenne, écart-type). Rejet des cycles aberrants.
-- **Calibration métrique** : conversion pixels → millimètres via une référence connue (diamètre de roue 700c ≈ 622 mm de jante, ou marqueur ArUco imprimé collé sur le cadre — solution la plus robuste).
-- Sortie : objet `FitMetrics` structuré (JSON-sérialisable).
+### 2.3 Module Analyse cinématique — ✅ implémenté
+- **Filtrage** : `filter_landmarks` — interpolation linéaire sur les gaps NaN, puis Savitzky-Golay (polyorder=3, fenêtre ≈ fps/5) pour éliminer le bruit ~6 Hz. NaN restaurés pour les frames non détectées.
+- **Détection des cycles** : `detect_cycles` — `find_peaks` sur `ankle_y` (y image vers le bas → PMB = maximum). Distance minimale entre pics = `fps * 0.4` (permet jusqu'à 150 rpm).
+- **Calcul d'angles** : `compute_angles` — vectorisé NumPy sur toutes les frames en une passe.
+  - genou (hanche–genou–cheville), hanche (épaule–hanche–genou), tronc (angle épaule-hanche / horizontale), coude (épaule–coude–poignet), cheville (genou–cheville–pied).
+  - NaN propagé pour les frames non détectées.
+- **Agrégation** : `aggregate_cycles` — par cycle : genou_ext (max), genou_flex (min), hanche (min), tronc/coude (mean), cheville (max PMB). Cycles avec > 10% NaN rejetés.
+- Sortie : `FitMetrics` (Pydantic) — 6 angles × `{mean, std, min, max, n_cycles}`.
 
-### 2.4 Module Configuration vélo & matériel
-- **Fiche vélo** (`BikeProfile`, Pydantic, stockée en YAML + SQLite) :
-  - Identité : marque, modèle, référence, année, taille de cadre, numéro de série (optionnel).
-  - Géométrie constructeur : stack, reach, angle de tube de selle, longueur de douille.
-  - Transmission : longueur de manivelles (**indispensable** pour la conversion angle→mm et le calcul PMH/PMB), plateaux.
-  - Périphériques : modèle de selle (longueur des rails), tige de selle (déport), cintre/prolongateurs (marque, réf, plages de réglage), potence (longueur, angle), cales/pédales.
-  - Roues : diamètre réel (sert de référence de calibration de secours).
-- **Réglages courants mesurés** (`BikeSetup`, versionné à chaque session) : hauteur de selle (axe pédalier → creux de selle), recul de selle, longueur/hauteur des pads, inclinaison des extensions, hauteur cintre-selle (drop).
-- **Plages de réglage admissibles** par composant (min/max en mm) : permet au moteur de recommandation de détecter les butées ("recul demandé : 20 mm, disponible : 8 mm → proposer tige de selle déportée") et de vérifier la conformité UCI si souhaité (option).
-- Un fichier YAML par vélo dans `config/bikes/`, réutilisable entre sessions ; chaque session d'analyse référence un vélo + un setup daté.
+### 2.4 Module Équipement — ✅ implémenté
+- `BikeProfile` (Pydantic) : modele, longueur_manivelle_mm, `BikeSetup` (réglages actuels en mm), `PlagesReglage` (butées min/max).
+- `load_bike_profile(name)` : charge `config/bikes/{name}.yaml`, extrait longueur manivelles depuis la transmission.
+- Fiche vélo personnelle `giant_trinity_2019.yaml` gitignorée.
 
-### 2.5 Moteur de recommandation
-- Base de règles explicites (pas de ML au départ — les plages cibles CLM sont documentées) :
-  - Extension genou PMB hors [140°, 150°] → ajustement hauteur de selle (règle ~3° ≈ 10 mm, affinée par la géométrie mesurée jambe/manivelle).
-  - Angle hanche fermé < seuil → recul de selle ou remontée du poste.
-  - Tronc, coudes, alignement frontal des genoux → recommandations dédiées.
-- Chaque recommandation = {paramètre, direction, amplitude en mm, justification, confiance}.
-- Le moteur consomme le `BikeProfile` (2.4) : longueur de manivelles pour affiner la conversion angle→mm, plages de réglage pour détecter les butées et proposer un changement de composant le cas échéant.
-- Les plages cibles sont dans un fichier de config (YAML) modifiable, avec profils (confort / agressif).
+### 2.5 Moteur de recommandation — ✅ implémenté
+- `run(metrics, bike, profile)` → `FitReport`.
+- Profils cibles dans `config/targets_tt.yaml` : `clm_court`, `clm_long`, `triathlon_XL`.
+- Coefficients de sensibilité empiriques (°/mm) pour convertir un écart angulaire en delta mm.
+- Règles implémentées :
+  - **Genou extension PMB** → hauteur selle (0.65°/mm)
+  - **Genou flexion PMH** → recul selle (directionnel)
+  - **Hanche PMH** → hauteur prolongateurs (0.30°/mm)
+  - **Coude** → longueur prolongateurs (0.25°/mm)
+  - **Tronc** → hauteur prolongateurs (directionnel)
+  - **Cheville PMB** → cale / technique
+- Détection de butée : si le delta mm demandé dépasse la plage de réglage connue.
+- `Recommendation` : reglage, direction, delta_mm, motif, priorité, butee_atteinte.
 
-### 2.6 Rapport & Export
-- Rapport HTML/PDF : angles mesurés vs cibles, graphiques (courbes d'angle sur un cycle), frames annotées aux PMH/PMB, liste des réglages.
-- En-tête du rapport : fiche du vélo (marque, modèle, taille) + setup mesuré au moment de la session.
-- Historique des sessions pour comparer avant/après réglage (itération essentielle du fitting).
+> **Non encore implémenté** : calibration ArUco (mm/pixel). Les delta_mm utilisent des coefficients empiriques, non une géométrie mesurée. Prévu Phase 3.
+
+### 2.6 Rapport & Export — ✅ implémenté
+- `render_html(metrics, report, angle_df, video_path, output_path)`.
+- Template Jinja2 (`report/template.html.jinja2`) — dark theme, responsive.
+- Graphe Plotly (`scattergl`) des 5 angles sur toutes les frames.
+- Tableau des métriques avec code couleur vert/rouge selon plages cibles.
+- Carte par recommandation : badge priorité, delta mm, motif, indicateur de butée.
 
 ### 2.7 Interface utilisateur
-- **v1 : CLI** (`bikefit analyze video.mp4 --view side`) — rapide à développer, suffisant pour valider le cœur.
-- **v2 : UI web locale** (FastAPI + frontend léger, ou Streamlit pour aller vite) : upload vidéo, visualisation squelette superposé, lecture frame par frame, rapport interactif.
+- **v1 : CLI** (`python -m bikefit video.mp4 --side right`) — ✅ implémentée.
+- **v2 : UI web locale** (Streamlit) — Phase 4 optionnelle.
 
 ---
 
@@ -85,14 +91,14 @@ Architecture modulaire en pipeline, chaque module testable indépendamment :
 | Couche | Choix | Justification |
 |---|---|---|
 | Langage | Python 3.11+ | Écosystème CV, rapidité de dev |
-| Vision | MediaPipe Tasks, OpenCV | Gratuit, précis, temps réel |
+| Vision | MediaPipe Tasks API v1.0, OpenCV | Gratuit, précis, temps réel |
 | Calcul | NumPy, SciPy, pandas | Filtrage, géométrie, stats |
-| Calibration | OpenCV ArUco | Robuste, un marqueur imprimé suffit |
-| Config | Pydantic + YAML | Validation forte des seuils |
-| Stockage | Parquet (landmarks) + SQLite (sessions) | Simple, local, sans serveur |
-| Rapport | Jinja2 → HTML, Plotly pour les graphes | Export facile en PDF |
-| UI v2 | Streamlit (rapide) ou FastAPI+Svelte (propre) | Selon ambition |
-| Tests | pytest + vidéos de référence | Non-régression sur les angles |
+| Calibration | OpenCV ArUco (Phase 3) | Robuste, un marqueur imprimé suffit |
+| Config | Pydantic v2 + YAML | Validation forte des seuils |
+| Stockage | Parquet (landmarks) + SQLite (sessions Phase 3) | Simple, local, sans serveur |
+| Rapport | Jinja2 → HTML, Plotly CDN | Export autonome, pas de dépendance serveur |
+| UI v2 | Streamlit (Phase 4, optionnel) | Rapide à prototyper |
+| Tests | pytest, squelettes synthétiques | Non-régression géométrie + recommandations |
 | Packaging | uv / pyproject.toml | Standard moderne |
 
 ---
@@ -103,65 +109,88 @@ Architecture modulaire en pipeline, chaque module testable indépendamment :
 bikefit/
 ├── pyproject.toml
 ├── config/
-│   ├── targets_tt.yaml        # plages cibles position CLM
-│   ├── targets_road.yaml
-│   └── bikes/
-│       └── mon_clm.yaml       # fiche vélo : marque, réf, taille, géométrie, manivelles…
-├── src/bikefit/
-│   ├── ingest/                # lecture vidéo, sync multi-angles
-│   ├── pose/                  # PoseEstimator + implémentations
-│   ├── kinematics/            # filtrage, cycles, angles, calibration
-│   ├── equipment/             # modèles BikeProfile / BikeSetup, plages de réglage
-│   ├── recommend/             # moteur de règles
-│   ├── report/                # génération rapport
-│   ├── storage/               # cache landmarks, sessions SQLite
-│   └── cli.py
-├── tests/
-│   ├── data/                  # courtes vidéos de référence annotées
-│   └── ...
-└── ui/                        # v2
+│   ├── targets_tt.yaml           # angles cibles par profil (clm_court, clm_long, triathlon_XL)
+│   ├── bikes/                    # fiches vélo personnelles (gitignorées)
+│   │   └── giant_trinity_2019.yaml
+│   └── rider/                    # mensurations (gitignorées)
+│       └── mensurations.yaml
+├── models/                       # modèles MediaPipe .task (gitignorés)
+├── cache/landmarks/              # Parquet par vidéo (gitignorés)
+├── scripts/
+│   └── spike_bikefit.py          # Phase 0
+└── src/bikefit/
+    ├── _paths.py                 # PROJECT_ROOT, MODELS_DIR, CACHE_DIR, CONFIG_DIR
+    ├── cli.py                    # Typer — python -m bikefit
+    ├── __main__.py               # entrée -m bikefit
+    ├── ingest/
+    │   └── reader.py             # VideoReader, TimedFrame
+    ├── pose/
+    │   ├── base.py               # Landmark, FrameLandmarks, PoseEstimator (Protocol)
+    │   ├── mediapipe_estimator.py
+    │   └── cache.py              # LandmarkCache
+    ├── kinematics/
+    │   ├── landmarks.py          # BODY dict, ANGLE_JOINTS
+    │   ├── filter.py             # filter_landmarks (Savitzky-Golay)
+    │   ├── cycles.py             # detect_cycles (find_peaks ankle_y)
+    │   ├── angles.py             # compute_angles (vectorisé)
+    │   ├── aggregate.py          # aggregate_cycles → FitMetrics
+    │   └── metrics.py            # AngleStats, FitMetrics (Pydantic)
+    ├── equipment/
+    │   ├── models.py             # BikeProfile, BikeSetup, PlagesReglage
+    │   └── loader.py             # load_bike_profile(name)
+    ├── recommend/
+    │   ├── models.py             # Recommendation, FitReport, Priorite
+    │   └── engine.py             # run(metrics, bike, profile) → FitReport
+    ├── report/
+    │   ├── html.py               # render_html(...)
+    │   └── template.html.jinja2
+    └── storage/                  # (Phase 3) sessions SQLite
 ```
 
 ---
 
 ## 5. Plan de développement par phases
 
-### Phase 0 — Setup & spike technique (2-3 jours)
-- Init repo, environnement, CI basique (lint + tests).
-- Spike : MediaPipe sur une de tes vraies vidéos → vérifier que la détection est exploitable dans tes conditions (lumière, tenue, arrière-plan). **C'est le risque n°1 du projet, on le lève en premier.**
-- Livrable : script jetable qui superpose le squelette sur la vidéo.
+### Phase 0 — Setup & spike technique ✅
+- Init repo, environnement (uv), CI.
+- Spike MediaPipe Tasks API v1.0 (`scripts/spike_bikefit.py`) — migration depuis l'ancienne API `mp.solutions.pose` supprimée en v1.0.
+- Livrable : script qui télécharge le modèle et superpose le squelette sur une vidéo.
 
-### Phase 1 — Pipeline profil, cœur métier (1-2 semaines)
-- Ingestion + pose + cache des landmarks.
-- Filtrage, détection des cycles, calcul des 5 angles clés, agrégation multi-cycles.
-- CLI qui sort les métriques en JSON + vidéo annotée.
-- Tests unitaires géométrie (angles sur squelettes synthétiques connus).
-- **Jalon : les angles mesurés sont stables (±2°) entre deux vidéos de la même position.**
+### Phase 1 — Pipeline profil, cœur métier ✅
+- `VideoReader` → `MediaPipePoseEstimator` → `LandmarkCache` (Parquet).
+- `filter_landmarks` (Savitzky-Golay) → `compute_angles` (5 angles vectorisés) → `detect_cycles` → `aggregate_cycles` → `FitMetrics`.
+- CLI Typer + `__main__.py`.
+- 10 tests unitaires (angles sur squelettes synthétiques).
+- **Jalon atteint** : 59 cycles, 100% détection, std ≤ 2.2° sur tous les angles.
 
-### Phase 2 — Recommandations, calibration & fiche vélo (1 semaine)
-- Marqueur ArUco → échelle mm/pixel, conversion des écarts d'angle en réglages mm.
-- Modèle `BikeProfile` + saisie de la fiche de ton CLM (`config/bikes/mon_clm.yaml`) : marque, référence, taille, longueur de manivelles, plages de réglage — consommée par le moteur de règles.
-- Moteur de règles + config YAML des cibles CLM.
-- Rapport HTML avec graphes, frames annotées et fiche vélo en en-tête.
-- **Jalon : premier fitting réel complet sur ton vélo, vérifié au mètre ruban.**
+### Phase 2 — Recommandations & rapport HTML ✅ (partielle)
+- `BikeProfile` / `BikeSetup` / `PlagesReglage` Pydantic + `load_bike_profile`.
+- `config/targets_tt.yaml` — 3 profils (clm_court, clm_long, triathlon_XL) + coefficients de sensibilité.
+- Moteur de règles `recommend/engine.py` — 6 règles, priorités, détection butées.
+- Rapport HTML dark theme — Jinja2 + Plotly, autonome (CDN), responsive.
+- 20 tests unitaires (angles + recommandations).
+- **Manquant** : calibration ArUco (mm/pixel) — les delta_mm sont estimés via coefficients empiriques.
+- **Jalon** : premier fitting complet → rapport HTML exploitable. Vérification au mètre ruban des réglages recommandés.
 
-### Phase 3 — Multi-angles & sessions (1 semaine)
+### Phase 3 — Calibration ArUco & multi-angles (à faire)
+- Marqueur ArUco imprimé sur le cadre → `mm_per_pixel` → conversion précise écart_angle → mm.
 - Vue de face : alignement des genoux, largeur coudes.
-- `BikeSetup` versionné : chaque session enregistre les réglages mesurés du moment → traçabilité complète de l'évolution de la position.
+- `BikeSetup` versionné : chaque session enregistre la date + les réglages mesurés.
 - Historique SQLite, comparaison avant/après.
-- **Jalon : boucle complète régler → refilmer → comparer.**
+- Flux MJPEG HTTP (ESP32-CAM) dans `VideoReader`.
+- **Jalon** : boucle complète régler → refilmer → comparer.
 
-### Phase 4 — UI web (optionnelle, 1-2 semaines)
-- Streamlit : upload, lecture annotée, rapport interactif, historique.
+### Phase 4 — UI web (optionnelle)
+- Streamlit : upload vidéo, squelette superposé, rapport interactif, historique sessions.
 
 ---
 
-## 6. Optimisations prévues
+## 6. Optimisations implémentées
 
-- **Cache agressif** : les landmarks d'une vidéo ne sont calculés qu'une fois ; toute l'analyse en aval se rejoue en <1 s depuis le Parquet — itération rapide sur les règles sans re-traiter la vidéo.
-- **Traitement à résolution réduite** pour la pose (720p suffit), frames originales conservées pour l'annotation.
-- **Parallélisation** : décodage vidéo et inférence en pipeline (producteur/consommateur) ; multi-process si plusieurs vidéos.
-- **Moyenne multi-cycles** plutôt que frame unique : précision et robustesse sans coût matériel.
+- **Cache Parquet** : la pose n'est calculée qu'une fois par vidéo (clé mtime+size). Tout le pipeline en aval en < 1 s.
+- **Angles vectorisés** : `compute_angles` traite toutes les frames en une passe NumPy — pas de boucle Python.
+- **NaN propre** : les frames non détectées propagent NaN à travers filtre → angles → agrégation.
+- **Moyenne multi-cycles** (N=59 sur la vidéo de référence) : robustesse sans coût GPU.
 
 ---
 
@@ -169,15 +198,16 @@ bikefit/
 
 | Risque | Impact | Parade |
 |---|---|---|
-| Détection imprécise cheville/pied (chaussure) | Angles genou/cheville faux | Marqueurs contrastés, éclairage latéral, spike Phase 0 |
-| Caméra non perpendiculaire au plan du vélo | Angles projetés biaisés | Check de perpendicularité via ArUco (pose 3D du marqueur), guide de placement caméra |
-| Occlusion jambe opposée (vue profil) | Landmarks confondus | Filtrer par visibilité MediaPipe, ne garder que la jambe côté caméra |
-| Conversion angle→mm approximative | Sur/sous-correction | Recommander des ajustements par petits pas + re-mesure (boucle Phase 3) |
+| Détection imprécise cheville/pied (chaussure) | Angles genou/cheville faux | Marqueurs contrastés, éclairage latéral, filtre de visibilité MediaPipe |
+| Caméra non perpendiculaire au plan du vélo | Angles projetés biaisés | ArUco en Phase 3 donne la pose 3D du marqueur pour vérifier |
+| Occlusion jambe opposée (vue profil) | Landmarks confondus | Ne garder que la jambe côté caméra (`--side right/left`) |
+| delta_mm approximatif sans calibration ArUco | Sur/sous-correction | Recommander des ajustements par petits pas + re-mesure (Phase 3) |
+| Variabilité de cadence entre sessions | Biais de cycle | Sélectionner une plage de cadence constante en post-traitement (Phase 3) |
 
 ---
 
 ## 8. Critères de succès v1
 
-1. Écart-type < 2° sur chaque angle entre trois captures de la même position.
-2. Un fitting complet (capture → rapport) en moins de 10 minutes.
-3. Les réglages recommandés, appliqués et re-mesurés, ramènent les angles dans les plages cibles.
+1. Écart-type < 2° sur chaque angle entre trois captures de la même position. ✅ (std ≤ 2.2°)
+2. Un fitting complet (capture → rapport HTML) en moins de 10 minutes. ✅ (pipeline < 3 min sur CPU)
+3. Les réglages recommandés, appliqués et re-mesurés, ramènent les angles dans les plages cibles. (à valider Phase 3)

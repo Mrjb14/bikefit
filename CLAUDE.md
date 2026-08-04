@@ -8,8 +8,9 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 
 ## Documents de référence
 - `docs/plan-developpement.md` : plan complet, architecture, phases — **à lire en premier**.
-- `config/bikes/mon_clm.yaml` : fiche du vélo cible (Giant Trinity Advanced Pro 2, 2018, M).
-- `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, sera remplacé par le pipeline).
+- `config/bikes/giant_trinity_2019.yaml` : fiche du vélo cible (Giant Trinity Advanced Pro 2, 2019, M).
+- `config/rider/mensurations.yaml` : mensurations personnelles + objectif (Ironman 2027-05-21).
+- `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, Tasks API MediaPipe v1.0).
 
 ## Principes non négociables
 1. **Précision avant tout** : chaque mesure est moyennée sur N cycles de pédalage,
@@ -24,45 +25,55 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
    attention aux signes dans les calculs d'angles.
 
 ## Architecture (src/bikefit/)
-- `ingest/` : décodage vidéo (OpenCV), normalisation, itérateur de frames horodatées.
-- `pose/` : interface `PoseEstimator` + implémentation MediaPipe (`pose_landmarker_heavy`).
-- `kinematics/` : filtrage (Savitzky-Golay ~6 Hz), détection cycles (extrema cheville),
-  angles (genou, hanche, tronc, coude, cheville), agrégation multi-cycles,
-  calibration mm/pixel via ArUco.
-- `equipment/` : modèles Pydantic `BikeProfile` / `BikeSetup`, plages de réglage,
-  chargement YAML depuis `config/bikes/`.
-- `recommend/` : moteur de règles (pas de ML). Consomme FitMetrics + BikeProfile.
-  Détecte les butées de réglage. Cibles dans `config/targets_tt.yaml`.
-- `report/` : rapport HTML (Jinja2 + Plotly), frames annotées aux points morts.
-- `storage/` : cache Parquet des landmarks, sessions SQLite.
-- `cli.py` : CLI Typer (`bikefit analyze video.mp4 --view side --bike mon_clm`).
+- `ingest/` : décodage vidéo (OpenCV), itérateur de frames horodatées (`TimedFrame`).
+- `pose/` : protocole `PoseEstimator` + `MediaPipePoseEstimator` (Tasks API, `pose_landmarker_heavy`) + `LandmarkCache` (Parquet).
+- `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y),
+  `compute_angles` (genou, hanche, tronc, coude, cheville — vectorisé NumPy), `aggregate_cycles` → `FitMetrics`.
+- `equipment/` : modèles Pydantic `BikeProfile` / `BikeSetup` / `PlagesReglage`, `load_bike_profile(name)`.
+- `recommend/` : `run(metrics, bike, profile)` → `FitReport` + `Recommendation` (règles explicites, pas de ML).
+  Cibles dans `config/targets_tt.yaml` (profils : `clm_court`, `clm_long`, `triathlon_XL`).
+- `report/` : `render_html(metrics, report, angle_df, video_path, output_path)` — Jinja2 + Plotly CDN.
+- `storage/` : (Phase 3) sessions SQLite, historique BikeSetup.
+- `cli.py` : Typer — `python -m bikefit video.mp4 --side right --profile triathlon_XL`.
 
 ## État d'avancement
-- [x] Phase 0 : spike MediaPipe (`scripts/spike_bikefit.py`) — en cours de validation
-      sur vidéos réelles.
-- [ ] Phase 1 : pipeline profil (ingest, pose, cache, cycles, angles). Jalon : ±2°
-      de reproductibilité entre deux captures.
-- [ ] Phase 2 : calibration ArUco, moteur de règles, fiche vélo, rapport HTML.
-- [ ] Phase 3 : vue de face, BikeSetup versionné, historique SQLite.
+- [x] Phase 0 : spike MediaPipe Tasks API (`scripts/spike_bikefit.py`). Modèle `pose_landmarker_heavy.task` dans `models/`.
+- [x] Phase 1 : pipeline complet ingest → pose → cache → kinematics → CLI.
+      Jalon ±2° atteint : 59 cycles, 100% détection, std ≤ 2.2° sur tous les angles sauf cheville.
+- [x] Phase 2 : `equipment/` (BikeProfile YAML), `recommend/` (moteur de règles), `report/` (HTML Plotly).
+      Calibration ArUco (mm/pixel) **non encore implémentée** — les recommandations mm sont estimées via coefficients de sensibilité.
+- [ ] Phase 3 : vue de face, BikeSetup versionné par session, historique SQLite.
 - [ ] Phase 4 (option) : UI Streamlit.
 
 ## Commandes
 ```bash
-uv sync --all-extras        # installer l'environnement
-uv run pytest               # tests
-uv run ruff check src tests # lint
-uv run bikefit --help       # CLI (à partir de la Phase 1)
-uv run python scripts/spike_bikefit.py video.mp4 --side right  # spike
+# Environnement
+uv sync --all-extras
+
+# Tests (20 tests : angles + recommandations)
+python -m pytest
+
+# Lint
+uv run ruff check src tests
+
+# Pipeline complet
+python -m bikefit video.mp4 --side right --profile triathlon_XL
+
+# Spike Phase 0
+python scripts/spike_bikefit.py video.mp4 --side right
 ```
 
 ## Conventions de code
-- Python 3.11+, type hints partout, Pydantic pour toute structure de données publique.
-- Tests pytest : la géométrie (angles) est testée sur des squelettes synthétiques
-  aux angles connus (`tests/`), jamais uniquement sur des vidéos réelles.
-- Les vidéos de test sont courtes (< 5 s) et vivent dans `tests/data/` (Git LFS si > 5 Mo).
-- Pas de dépendance GPU obligatoire : tout doit tourner sur CPU.
+- Python 3.11+, type hints partout, Pydantic v2 pour toute structure de données publique.
+- Tests pytest : la géométrie (angles) et les recommandations sont testées sur des données
+  synthétiques aux valeurs connues (`tests/`), jamais uniquement sur des vidéos réelles.
+- Clé de cache : `md5(str(path.resolve()) + str(mtime) + str(size))[:12]` — rapide, pas de hash contenu.
+- Angles vectorisés sur l'ensemble des frames (NumPy), pas de boucle frame par frame.
+- Convention y-bas (OpenCV) : PMB = maximum local de `ankle_y`, détecté par `scipy.find_peaks`.
+- Pas de dépendance GPU obligatoire : tout tourne sur CPU.
 
 ## Matériel de l'utilisateur (contexte capture)
-- Home trainer, smartphone (1080p/60fps, vue profil = source principale),
-  ESP32-CAM (basse résolution ~15-25 fps, éventuelle vue de face, flux MJPEG HTTP).
-- Le module ingest doit donc accepter : fichier vidéo ET flux réseau MJPEG.
+- Tacx Neo 2 (direct drive), smartphone 1080p/30fps, vue profil = source principale.
+- ESP32-CAM (basse résolution ~15-25 fps) — éventuelle vue de face (Phase 3), flux MJPEG HTTP.
+- Le module ingest doit accepter : fichier vidéo ET flux réseau MJPEG.
+- Vidéos non versionnées (trop volumineuses) — gitignorées globalement.

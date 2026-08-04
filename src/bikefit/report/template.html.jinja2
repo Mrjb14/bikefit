@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BikeFit — Rapport {{ date }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f1117; color: #e2e8f0; line-height: 1.6; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+    h1 { font-size: 1.8rem; font-weight: 700; color: #f7fafc; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.1rem; font-weight: 600; color: #a0aec0; margin: 2rem 0 1rem; text-transform: uppercase; letter-spacing: .08em; }
+    .subtitle { color: #718096; font-size: 0.9rem; margin-bottom: 2rem; }
+    /* résumé */
+    .resume-box { background: #1a202c; border-left: 4px solid #4299e1; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 2rem; font-size: 0.95rem; }
+    /* grille métriques */
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .metric-card { background: #1a202c; border-radius: 8px; padding: 1rem; border: 1px solid #2d3748; }
+    .metric-card.ok   { border-color: #38a169; }
+    .metric-card.warn { border-color: #e53e3e; }
+    .metric-name  { font-size: 0.78rem; color: #718096; text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; }
+    .metric-value { font-size: 1.5rem; font-weight: 700; }
+    .metric-card.ok   .metric-value { color: #68d391; }
+    .metric-card.warn .metric-value { color: #fc8181; }
+    .metric-std   { font-size: 0.75rem; color: #718096; }
+    .metric-range { font-size: 0.72rem; color: #4a5568; margin-top: .25rem; }
+    /* recommandations */
+    .rec-list { display: flex; flex-direction: column; gap: .75rem; margin-bottom: 2rem; }
+    .rec-card { background: #1a202c; border-radius: 8px; padding: 1rem 1.25rem; display: flex; align-items: flex-start; gap: 1rem; border: 1px solid #2d3748; }
+    .rec-card.haute   { border-left: 4px solid #e53e3e; }
+    .rec-card.moyenne { border-left: 4px solid #ed8936; }
+    .rec-card.faible  { border-left: 4px solid #4299e1; }
+    .rec-badge { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; padding: .2rem .5rem; border-radius: 4px; white-space: nowrap; }
+    .rec-card.haute   .rec-badge { background: #e53e3e22; color: #fc8181; }
+    .rec-card.moyenne .rec-badge { background: #ed893622; color: #fbd38d; }
+    .rec-card.rec-card.faible  .rec-badge { background: #4299e122; color: #90cdf4; }
+    .rec-body { flex: 1; }
+    .rec-reglage { font-weight: 600; font-size: 0.95rem; }
+    .rec-delta { display: inline-block; margin-left: .5rem; font-size: 0.85rem; color: #f6e05e; font-weight: 600; }
+    .rec-motif { font-size: 0.85rem; color: #a0aec0; margin-top: .2rem; }
+    .rec-butee { font-size: 0.75rem; color: #fc8181; margin-top: .2rem; }
+    /* chart */
+    #chart-angles { width: 100%; min-height: 380px; margin-bottom: 2rem; }
+    /* footer */
+    footer { font-size: 0.75rem; color: #4a5568; margin-top: 3rem; border-top: 1px solid #2d3748; padding-top: 1rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>BikeFit — Analyse CLM</h1>
+  <p class="subtitle">{{ video_name }} &nbsp;·&nbsp; {{ date }} &nbsp;·&nbsp; Profil : <strong>{{ report.profil_utilise }}</strong> &nbsp;·&nbsp; {{ metrics.n_cycles_used }} cycles &nbsp;·&nbsp; Détection {{ "%.0f"|format(metrics.detection_rate * 100) }}%</p>
+
+  <div class="resume-box">{{ report.resume }}</div>
+
+  <h2>Métriques angulaires</h2>
+  <div class="metrics-grid">
+    {% set cards = [
+      ("Genou ext. PMB", metrics.genou_extension_pmb, "genou_extension_pmb"),
+      ("Genou flex. PMH", metrics.genou_flexion_pmh,  "genou_flexion_pmh"),
+      ("Hanche PMH",      metrics.hanche_fermee_pmh,  "hanche_fermee_pmh"),
+      ("Tronc",           metrics.tronc,              "tronc"),
+      ("Coude",           metrics.coude,              "coude"),
+      ("Cheville PMB",    metrics.cheville_pmb,       "cheville_pmb"),
+    ] %}
+    {% for label, stat, key in cards %}
+    {% set cls = "warn" if key in report.angles_hors_cible else "ok" %}
+    <div class="metric-card {{ cls }}">
+      <div class="metric-name">{{ label }}</div>
+      <div class="metric-value">{{ "%.1f"|format(stat.mean) }}°</div>
+      <div class="metric-std">± {{ "%.1f"|format(stat.std) }}° &nbsp; [{{ "%.1f"|format(stat.min) }} – {{ "%.1f"|format(stat.max) }}]</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h2>Recommandations</h2>
+  {% if report.recommandations %}
+  <div class="rec-list">
+    {% for rec in report.recommandations %}
+    <div class="rec-card {{ rec.priorite }}">
+      <span class="rec-badge">{{ rec.priorite }}</span>
+      <div class="rec-body">
+        <span class="rec-reglage">{{ rec.reglage.replace("_", " ").title() }}</span>
+        <span>→ {{ rec.direction }}</span>
+        {% if rec.delta_mm is not none %}<span class="rec-delta">~{{ rec.delta_mm|int }} mm</span>{% endif %}
+        {% if rec.butee_atteinte %}<div class="rec-butee">⚠ Butée de réglage atteinte</div>{% endif %}
+        <div class="rec-motif">{{ rec.motif }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="color:#68d391">Aucun réglage suggéré — position dans les plages cibles.</p>
+  {% endif %}
+
+  <h2>Angles par frame</h2>
+  <div id="chart-angles"></div>
+
+  <footer>Généré par BikeFit CLM &nbsp;·&nbsp; {{ date }}</footer>
+</div>
+
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script>
+const plotData = {{ chart_json }};
+const layout = {
+  paper_bgcolor: "#0f1117",
+  plot_bgcolor:  "#1a202c",
+  font: { color: "#a0aec0", size: 12 },
+  xaxis: { title: "Frame", gridcolor: "#2d3748", zeroline: false },
+  yaxis: { title: "Angle (°)", gridcolor: "#2d3748", zeroline: false },
+  legend: { orientation: "h", y: -0.15 },
+  margin: { t: 20, r: 20, b: 60, l: 50 },
+  hovermode: "x unified",
+};
+Plotly.newPlot("chart-angles", plotData, layout, { responsive: true, displayModeBar: false });
+</script>
+</body>
+</html>
