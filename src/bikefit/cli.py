@@ -330,7 +330,7 @@ def measure_body(
             raise typer.Exit(1)
         updated = update_null_fields(yaml_path, estimates)
         if updated:
-            typer.echo(f"\n✓ {len(updated)} champ(s) mis à jour dans {yaml_path} : {updated}")
+            typer.echo(f"\nOK: {len(updated)} champ(s) mis à jour dans {yaml_path} : {updated}")
         else:
             typer.echo("\nAucun champ null à mettre à jour (déjà renseignés).")
     else:
@@ -443,7 +443,7 @@ def measure_setup(
             raise typer.Exit(1)
         updated = update_null_fields(yaml_path, display)
         if updated:
-            typer.echo(f"\n✓ {len(updated)} champ(s) mis à jour dans {yaml_path} : {updated}")
+            typer.echo(f"\nOK: {len(updated)} champ(s) mis à jour dans {yaml_path} : {updated}")
         else:
             typer.echo("\nAucun champ null à mettre à jour (déjà renseignés).")
     else:
