@@ -165,7 +165,7 @@ def analyze(
     # ── Rapport HTML ─────────────────────────────────────────────────────────
     _report_kwargs = {
         "rider": rider_profile,
-        "longueur_manivelle_mm": bike_profile.longueur_manivelle_mm,
+        "bike": bike_profile,
     }
     if report:
         render_html(metrics, fit_report, angle_df, video, report, **_report_kwargs)
