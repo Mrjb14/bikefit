@@ -11,6 +11,7 @@ htmlcov/
 
 # Données volumineuses / générées (gitignorées, stockées dans data/)
 *.mp4
+*.jpg
 *.mov
 *.avi
 *.parquet
@@ -24,6 +25,7 @@ reports/
 # Conf Perso
 config/bikes/*
 config/rider/*
+firmware/esp32cam_mjpeg/secrets.h
 
 # OS / IDE
 .DS_Store
