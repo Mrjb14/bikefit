@@ -27,7 +27,15 @@ _ANGLE_LABELS = {
 @app.command()
 def analyze(
     video: Annotated[Path, typer.Argument(help="Vidéo de profil (mp4/mov)")],
-    view: Annotated[str, typer.Option(help="side | front")] = "side",
+    front: Annotated[
+        str | None,
+        typer.Option(
+            help="Vidéo (fichier) ou flux MJPEG (URL http://...) vue de face, optionnel — Phase 3C"
+        ),
+    ] = None,
+    front_duration: Annotated[
+        float, typer.Option(help="Durée de capture (s) si --front est un flux réseau")
+    ] = 15.0,
     bike: Annotated[str, typer.Option(help="Fiche vélo dans config/bikes/")] = "giant_trinity_2019",
     side: Annotated[str, typer.Option(help="right | left — côté filmé")] = "right",
     profile: Annotated[
@@ -51,11 +59,13 @@ def analyze(
     from bikefit.ingest import VideoReader
     from bikefit.kinematics import (
         aggregate_cycles,
+        aggregate_frontal_cycles,
         compute_angles,
+        compute_frontal_metrics,
         detect_cycles,
         filter_landmarks,
     )
-    from bikefit.pose import LandmarkCache, MediaPipePoseEstimator
+    from bikefit.pose import LandmarkCache, MediaPipePoseEstimator, compute_landmarks
     from bikefit.pose.cache import CACHE_DIR
     from bikefit.recommend import recommend as run_recommend
     from bikefit.report import render_html
@@ -118,6 +128,47 @@ def analyze(
                 f"Calibration {status} : {calib.mm_per_pixel:.4f} mm/px"
                 f" ({calib.n_detected}/{calib.n_sampled} frames)"
             )
+
+    # ── Vue de face (optionnelle, Phase 3C) ──────────────────────────────────
+    if front is not None:
+        typer.echo(f"\nVue de face : {front}")
+        front_reader = VideoReader(front)
+        typer.echo(
+            f"  {front_reader.width}x{front_reader.height} @ {front_reader.fps:.1f} fps"
+            + (" (flux réseau)" if front_reader.is_stream else "")
+        )
+
+        with MediaPipePoseEstimator() as front_estimator:
+            if front_reader.is_stream:
+                typer.echo(f"  Capture {front_duration:.0f}s...")
+                front_df = compute_landmarks(
+                    front_reader, front_estimator, max_duration_s=front_duration
+                )
+            else:
+                front_cache = LandmarkCache(CACHE_DIR / "landmarks")
+                front_df = front_cache.get_or_compute(Path(front), front_reader, front_estimator)
+
+        front_detection_rate = front_df["detected"].mean()
+        typer.echo(f"  Taux de détection : {front_detection_rate:.1%}")
+
+        front_filtered = filter_landmarks(front_df, front_reader.fps)
+        frontal_df = compute_frontal_metrics(
+            front_filtered, front_reader.width, front_reader.height
+        )
+        front_cycles = detect_cycles(front_filtered, "right", front_reader.fps)
+        typer.echo(f"  Cycles détectés : {len(front_cycles)}")
+
+        if len(front_cycles) < 2:
+            typer.echo(
+                "  Avertissement : moins de 2 cycles vue de face — résultats peu fiables.",
+                err=True,
+            )
+        else:
+            mm_per_px = metrics.calibration.mm_per_pixel if metrics.calibration else None
+            frontal_stats = aggregate_frontal_cycles(
+                frontal_df, front_cycles, mm_per_pixel=mm_per_px
+            )
+            metrics = metrics.model_copy(update=frontal_stats)
 
     # ── Équipement ───────────────────────────────────────────────────────────
     try:
