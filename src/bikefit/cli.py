@@ -313,6 +313,16 @@ def measure_body(
     for key, val in estimates.items():
         typer.echo(f"  {key:<20} {val:>5} mm")
 
+    # ── Annotation visuelle ───────────────────────────────────────────────────
+    from bikefit.measure.render import annotate_body_photo
+
+    annotated = photo.with_name(photo.stem + "_annotated.jpg")
+    try:
+        annotate_body_photo(photo, estimates, annotated)
+        typer.echo(f"Photo annotée     -> {annotated}")
+    except Exception as exc:
+        typer.echo(f"Avertissement : annotation échouée ({exc})", err=True)
+
     if write:
         yaml_path = CONFIG_DIR / "rider" / f"{rider}.yaml"
         if not yaml_path.exists():
@@ -396,6 +406,19 @@ def measure_setup(
         image_height=reader.height,
         side=side,  # type: ignore[arg-type]
     )
+
+    # ── Annotation visuelle (avant de popper les clés de debug) ──────────────
+    from bikefit.measure.render import annotate_setup_frame
+
+    annotated = video.with_name(video.stem + "_annotated.jpg")
+    try:
+        annotate_setup_frame(
+            str(video), df, estimates, calib.mm_per_pixel,
+            reader.width, reader.height, side, annotated,
+        )
+        typer.echo(f"Frame annotée     -> {annotated}")
+    except Exception as exc:
+        typer.echo(f"Avertissement : annotation échouée ({exc})", err=True)
 
     # Infos de debug
     bb_px = estimates.pop("_bb_px")
