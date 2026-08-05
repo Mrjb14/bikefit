@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 from pydantic import BaseModel
+
+from bikefit.calibration.models import CalibrationResult
 
 
 class AngleStats(BaseModel):
@@ -19,3 +23,4 @@ class FitMetrics(BaseModel):
     n_cycles_total: int
     n_cycles_used: int
     detection_rate: float
+    calibration: CalibrationResult | None = None

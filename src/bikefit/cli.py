@@ -38,6 +38,10 @@ def analyze(
     no_cache: Annotated[bool, typer.Option(help="Force le recalcul des landmarks")] = False,
     save_session: Annotated[bool, typer.Option(help="Sauvegarde la session dans la BDD")] = False,
     db: Annotated[Path, typer.Option(help="Chemin de la base SQLite")] = _DB_DEFAULT,
+    marker_size: Annotated[
+        float | None,
+        typer.Option(help="Taille du côté du marqueur ArUco en mm (ex. 100)."),
+    ] = None,
 ) -> None:
     """Analyse une vidéo et produit les métriques de fitting + recommandations."""
     from bikefit.equipment import load_bike_profile
@@ -95,6 +99,22 @@ def analyze(
         typer.echo("Avertissement : moins de 3 cycles — résultats peu fiables.", err=True)
 
     metrics = aggregate_cycles(angle_df, cycles)
+
+    # ── Calibration ArUco (optionnelle) ──────────────────────────────────────
+    if marker_size is not None:
+        from bikefit.calibration import calibrate_from_video
+
+        typer.echo(f"Calibration ArUco (marqueur {marker_size:.0f} mm)...")
+        calib = calibrate_from_video(str(video), marker_size_mm=marker_size)
+        if calib is None:
+            typer.echo("Avertissement : aucun marqueur ArUco détecté.", err=True)
+        else:
+            metrics = metrics.model_copy(update={"calibration": calib})
+            status = "fiable" if calib.is_reliable else "peu fiable"
+            typer.echo(
+                f"Calibration {status} : {calib.mm_per_pixel:.4f} mm/px"
+                f" ({calib.n_detected}/{calib.n_sampled} frames)"
+            )
 
     # ── Équipement ───────────────────────────────────────────────────────────
     try:
