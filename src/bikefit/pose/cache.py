@@ -37,6 +37,31 @@ def _fl_to_dict(fl: FrameLandmarks) -> dict:
     return row
 
 
+def compute_landmarks(
+    reader: VideoReader,
+    estimator: PoseEstimator,
+    progress: bool = True,
+    max_duration_s: float | None = None,
+) -> pd.DataFrame:
+    """Calcule les landmarks pour chaque frame lue par `reader` (fichier ou flux réseau).
+
+    max_duration_s borne la capture dans le temps — indispensable pour un flux
+    réseau (ESP32-CAM) qui n'a pas de fin naturelle, ignoré pour un fichier local.
+    """
+    if progress:
+        print(f"Calcul des landmarks ({reader.frame_count or '?'} frames) ...")
+    rows = []
+    for frame in reader.frames():
+        if max_duration_s is not None and frame.timestamp_ms > max_duration_s * 1000:
+            break
+        fl = estimator.process(frame.frame_bgr, frame.timestamp_ms, frame.frame_idx)
+        rows.append(_fl_to_dict(fl))
+        if progress and frame.frame_idx % 100 == 0:
+            print(f"  frame {frame.frame_idx}/{reader.frame_count or '?'}")
+
+    return pd.DataFrame(rows)
+
+
 class LandmarkCache:
     def __init__(self, cache_dir: Path = CACHE_DIR / "landmarks") -> None:
         self._cache_dir = cache_dir
@@ -56,16 +81,7 @@ class LandmarkCache:
                 print(f"Cache trouvé : {cache_path.name}")
             return pd.read_parquet(cache_path)
 
-        if progress:
-            print(f"Calcul des landmarks ({reader.frame_count} frames) ...")
-        rows = []
-        for frame in reader.frames():
-            fl = estimator.process(frame.frame_bgr, frame.timestamp_ms, frame.frame_idx)
-            rows.append(_fl_to_dict(fl))
-            if progress and frame.frame_idx % 100 == 0:
-                print(f"  frame {frame.frame_idx}/{reader.frame_count}")
-
-        df = pd.DataFrame(rows)
+        df = compute_landmarks(reader, estimator, progress=progress)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         df.to_parquet(cache_path, index=False)
         if progress:
