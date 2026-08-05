@@ -112,7 +112,9 @@
   {% endif %}
 
   <h2>Schéma des réglages</h2>
-  <div style="background:#1a202c;border-radius:8px;padding:1.5rem 1rem;margin-bottom:2rem;overflow:hidden">
+  <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:2rem">
+  <div style="flex:2 1 500px;background:#1a202c;border-radius:8px;padding:1.5rem 1rem;overflow:hidden">
+    <div style="text-align:center;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#718096;margin-bottom:.75rem">Vue de côté</div>
     <svg viewBox="0 0 760 430" style="width:100%;display:block" font-family="system-ui,-apple-system,sans-serif">
       <!--
         Géométrie CLM / TT corrigée :
@@ -252,6 +254,52 @@
       <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#90cdf4;margin-right:.4rem;vertical-align:middle"></span>Priorité faible</span>
       <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4a5568;margin-right:.4rem;vertical-align:middle"></span>Aucun réglage</span>
     </div>
+  </div>
+
+  <div style="flex:1 1 220px;background:#1a202c;border-radius:8px;padding:1.5rem 1rem;overflow:hidden">
+    <div style="text-align:center;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#718096;margin-bottom:.75rem">Vue de face</div>
+    <svg viewBox="0 0 260 430" style="width:100%;display:block" font-family="system-ui,-apple-system,sans-serif">
+      <!-- Vue de face stylisée : roue avant + potence/direction + cintre aero, vus dans l'axe -->
+
+      <!-- ══ ROUE VUE PAR LA TRANCHE (pneu = capsule fine, pas un cercle) ══ -->
+      <rect x="121" y="262" width="18" height="156" rx="9" fill="#2d3748" stroke="#3d4a5c" stroke-width="4"/>
+      <circle cx="130" cy="340" r="5" fill="#4a5568"/>
+
+      <!-- ══ FOURCHE / DIRECTION (steerer, jambes de fourche superposées de face) ══ -->
+      <line x1="130" y1="262" x2="130" y2="175" stroke="#8090a8" stroke-width="9" stroke-linecap="round"/>
+      <line x1="130" y1="175" x2="130" y2="145" stroke="#c0cce0" stroke-width="10" stroke-linecap="round"/>
+
+      <!-- Amorces tube sup. / tube diagonal (cadre en grande partie masqué de face) -->
+      <line x1="130" y1="175" x2="108" y2="200" stroke="#6a7d96" stroke-width="5" stroke-linecap="round"/>
+      <line x1="130" y1="175" x2="152" y2="197" stroke="#b0bdd0" stroke-width="6" stroke-linecap="round"/>
+
+      <!-- ══ POTENCE ══ -->
+      <rect x="124" y="145" width="12" height="13" rx="2" fill="#718096"/>
+
+      <!-- ══ CINTRE + COCOTTES ══ -->
+      <line x1="90" y1="145" x2="170" y2="145" stroke="#b0bdd0" stroke-width="8" stroke-linecap="round"/>
+      <rect x="84"  y="140" width="14" height="11" rx="3" fill="#718096"/>
+      <rect x="162" y="140" width="14" height="11" rx="3" fill="#718096"/>
+
+      <!-- ══ PADS AERO (symétriques) ══ -->
+      <rect x="99"  y="120" width="24" height="13" rx="3" fill="#718096"/>
+      <rect x="137" y="120" width="24" height="13" rx="3" fill="#718096"/>
+      <!-- Extrémités des prolongateurs, pointant vers la caméra (vues en coupe) -->
+      <circle cx="111" cy="112" r="5" fill="none" stroke="#b0bdd0" stroke-width="3"/>
+      <circle cx="149" cy="112" r="5" fill="none" stroke="#b0bdd0" stroke-width="3"/>
+
+      {% if metrics.largeur_coudes %}
+      <!-- Largeur coudes mesurée (vue de face, Phase 3C) -->
+      <line x1="99" y1="126" x2="161" y2="126" stroke="#f6e05e" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.85"/>
+      <text x="130" y="106" text-anchor="middle" fill="#f6e05e" font-size="10">↔ {{ metrics.largeur_coudes.mean|int }} mm</text>
+      {% endif %}
+    </svg>
+    {% if metrics.genou_deviation_gauche and metrics.genou_deviation_droit %}
+    <div style="text-align:center;font-size:.72rem;color:#a0aec0;margin-top:.5rem">
+      Déviation genoux : G {{ "%.1f"|format(metrics.genou_deviation_gauche.mean) }}° · D {{ "%.1f"|format(metrics.genou_deviation_droit.mean) }}°
+    </div>
+    {% endif %}
+  </div>
   </div>
 
   <h2>Angles par frame</h2>
