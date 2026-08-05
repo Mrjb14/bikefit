@@ -9,15 +9,10 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Modèles ML (téléchargés automatiquement)
-models/
-
-# Données volumineuses / générées
+# Données volumineuses / générées (gitignorées, stockées dans data/)
 *.mp4
 *.mov
 *.avi
-spike_output/
-cache/
 *.parquet
 *.sqlite
 *.db
@@ -36,7 +31,4 @@ config/rider/*
 .vscode/
 
 # Logs
-*.log   
-
-# Autres
-ideacomsa
+*.log
