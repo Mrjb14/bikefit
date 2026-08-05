@@ -44,6 +44,10 @@
     .chart-card { background: #1a202c; border-radius: 8px; padding: .75rem 1rem; }
     .chart-label { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; margin-bottom: .25rem; }
     .chart-box { height: 200px; }
+    /* rider bar */
+    .rider-bar { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; font-size: 0.82rem; color: #a0aec0; margin-bottom: 1.25rem; padding: .5rem .75rem; background: #1a202c; border-radius: 6px; border: 1px solid #2d3748; }
+    .rider-bar span { white-space: nowrap; }
+    .geo-ref { color: #f6e05e; cursor: help; border-bottom: 1px dashed #f6e05e88; }
     /* footer */
     footer { font-size: 0.75rem; color: #4a5568; margin-top: 3rem; border-top: 1px solid #2d3748; padding-top: 1rem; }
   </style>
@@ -52,6 +56,18 @@
 <div class="container">
   <h1>BikeFit — Analyse CLM</h1>
   <p class="subtitle">{{ video_name }} &nbsp;·&nbsp; {{ date }} &nbsp;·&nbsp; Profil : <strong>{{ report.profil_utilise }}</strong> &nbsp;·&nbsp; {{ metrics.n_cycles_used }} cycles &nbsp;·&nbsp; Détection {{ "%.0f"|format(metrics.detection_rate * 100) }}%</p>
+
+  {% if rider %}
+  <div class="rider-bar">
+    {% if rider.taille %}<span>↕ {{ rider.taille }} mm</span>{% endif %}
+    {% if rider.poids_kg %}<span>⚖ {{ rider.poids_kg }} kg</span>{% endif %}
+    {% if rider.age %}<span>{{ rider.age }} ans</span>{% endif %}
+    {% if rider.flexibilite %}<span>Flexibilité : {{ rider.flexibilite }}</span>{% endif %}
+    {% if rider.type_epreuve %}<span>🎯 {{ rider.type_epreuve }}</span>{% endif %}
+    {% if rider.echeance %}<span>📅 {{ rider.echeance }}</span>{% endif %}
+    {% if rider.selle_geo_mm %}<span class="geo-ref" title="Formule LeMond — à valider au ruban">Selle géo. ~{{ rider.selle_geo_mm }} mm</span>{% endif %}
+  </div>
+  {% endif %}
 
   <div class="resume-box">{{ report.resume }}</div>
 

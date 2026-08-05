@@ -12,16 +12,21 @@ from bikefit.storage.models import Session
 _DB_NAME = "sessions.db"
 _DDL = """
 CREATE TABLE IF NOT EXISTS sessions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    date        TEXT    NOT NULL,
-    video_path  TEXT    NOT NULL,
-    bike_name   TEXT    NOT NULL,
-    profile     TEXT    NOT NULL,
-    setup_json  TEXT    NOT NULL,
-    metrics_json TEXT   NOT NULL,
-    report_json TEXT    NOT NULL
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    date         TEXT    NOT NULL,
+    video_path   TEXT    NOT NULL,
+    bike_name    TEXT    NOT NULL,
+    rider_name   TEXT,
+    profile      TEXT    NOT NULL,
+    setup_json   TEXT    NOT NULL,
+    metrics_json TEXT    NOT NULL,
+    report_json  TEXT    NOT NULL
 );
 """
+
+_MIGRATIONS = [
+    "ALTER TABLE sessions ADD COLUMN rider_name TEXT",
+]
 
 
 class SessionStore:
@@ -30,6 +35,13 @@ class SessionStore:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_DDL)
+            # Apply forward migrations silently (column may already exist)
+            for sql in _MIGRATIONS:
+                try:
+                    conn.execute(sql)
+                    conn.commit()
+                except Exception:
+                    pass
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -42,13 +54,15 @@ class SessionStore:
             cur = conn.execute(
                 """
                 INSERT INTO sessions
-                    (date, video_path, bike_name, profile, setup_json, metrics_json, report_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (date, video_path, bike_name, rider_name, profile,
+                     setup_json, metrics_json, report_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session.date.isoformat(),
                     session.video_path,
                     session.bike_name,
+                    session.rider_name,
                     session.profile,
                     session.setup.model_dump_json(),
                     session.metrics.model_dump_json(),
@@ -91,11 +105,13 @@ def _row_to_session(row: sqlite3.Row) -> Session:
     from bikefit.kinematics.metrics import FitMetrics
     from bikefit.recommend.models import FitReport
 
+    keys = row.keys()
     return Session(
         id=row["id"],
         date=datetime.fromisoformat(row["date"]),
         video_path=row["video_path"],
         bike_name=row["bike_name"],
+        rider_name=row["rider_name"] if "rider_name" in keys else None,
         profile=row["profile"],
         setup=BikeSetup(**json.loads(row["setup_json"])),
         metrics=FitMetrics(**json.loads(row["metrics_json"])),

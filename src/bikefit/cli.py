@@ -35,6 +35,9 @@ def analyze(
     ] = "triathlon_XL",
     output: Annotated[Path | None, typer.Option(help="Fichier JSON de sortie")] = None,
     report: Annotated[Path | None, typer.Option(help="Rapport HTML de sortie")] = None,
+    rider: Annotated[
+        str, typer.Option(help="Fiche coureur dans config/rider/ (sans .yaml)")
+    ] = "mensurations",
     no_cache: Annotated[bool, typer.Option(help="Force le recalcul des landmarks")] = False,
     save_session: Annotated[bool, typer.Option(help="Sauvegarde la session dans la BDD")] = False,
     db: Annotated[Path, typer.Option(help="Chemin de la base SQLite")] = _DB_DEFAULT,
@@ -44,7 +47,7 @@ def analyze(
     ] = None,
 ) -> None:
     """Analyse une vidéo et produit les métriques de fitting + recommandations."""
-    from bikefit.equipment import load_bike_profile
+    from bikefit.equipment import load_bike_profile, load_rider_profile
     from bikefit.ingest import VideoReader
     from bikefit.kinematics import (
         aggregate_cycles,
@@ -128,8 +131,23 @@ def analyze(
 
         bike_profile = BikeProfile(modele=BikeModel(marque="", nom=bike, annee=0, taille=""))
 
+    rider_profile = load_rider_profile(rider)
+    if rider_profile is None and rider != "mensurations":
+        typer.echo(f"Avertissement : fiche coureur '{rider}' introuvable.", err=True)
+    elif rider_profile is not None:
+        flex = rider_profile.profil.flexibilite
+        epreuve = rider_profile.objectif.type_epreuve
+        typer.echo(
+            f"Coureur : flexibilité={flex or '?'}, épreuve={epreuve or '?'}"
+            + (
+                f", entrejambe={rider_profile.mensurations.entrejambe} mm"
+                if rider_profile.mensurations.entrejambe
+                else ""
+            )
+        )
+
     # ── Recommandations ──────────────────────────────────────────────────────
-    fit_report = run_recommend(metrics, bike_profile, profile=profile)
+    fit_report = run_recommend(metrics, bike_profile, profile=profile, rider=rider_profile)
 
     # ── Sortie JSON ──────────────────────────────────────────────────────────
     result = {
@@ -145,12 +163,16 @@ def analyze(
         typer.echo("\n" + json_str)
 
     # ── Rapport HTML ─────────────────────────────────────────────────────────
+    _report_kwargs = {
+        "rider": rider_profile,
+        "longueur_manivelle_mm": bike_profile.longueur_manivelle_mm,
+    }
     if report:
-        render_html(metrics, fit_report, angle_df, video, report)
+        render_html(metrics, fit_report, angle_df, video, report, **_report_kwargs)
         typer.echo(f"Rapport HTML -> {report}")
     else:
         default_report = video.with_suffix(".html")
-        render_html(metrics, fit_report, angle_df, video, default_report)
+        render_html(metrics, fit_report, angle_df, video, default_report, **_report_kwargs)
         typer.echo(f"Rapport HTML -> {default_report}")
 
     # ── Session SQLite ────────────────────────────────────────────────────────
@@ -162,6 +184,7 @@ def analyze(
             Session(
                 video_path=str(video.resolve()),
                 bike_name=bike,
+                rider_name=rider if rider_profile is not None else None,
                 profile=profile,
                 setup=bike_profile.setup_actuel,
                 metrics=metrics,

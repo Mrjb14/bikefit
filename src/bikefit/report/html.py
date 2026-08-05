@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader
 
+from bikefit.equipment.rider import RiderProfile
 from bikefit.kinematics.metrics import FitMetrics
 from bikefit.recommend.models import FitReport
 
@@ -76,12 +77,30 @@ def _build_annotations(report: FitReport) -> dict:
     return result
 
 
+def _build_rider_ctx(rider: RiderProfile | None, longueur_manivelle_mm: float = 172.5) -> dict:
+    """Construit le contexte coureur pour le template (valeurs affichables)."""
+    if rider is None:
+        return {}
+    return {
+        "taille": rider.mensurations.taille,
+        "poids_kg": rider.profil.poids_kg,
+        "age": rider.profil.age,
+        "flexibilite": rider.profil.flexibilite,
+        "type_epreuve": rider.objectif.type_epreuve,
+        "echeance": rider.objectif.echeance,
+        "entrejambe": rider.mensurations.entrejambe,
+        "selle_geo_mm": rider.saddle_height_geo_mm(longueur_manivelle_mm),
+    }
+
+
 def render(
     metrics: FitMetrics,
     report: FitReport,
     angle_df: pd.DataFrame,
     video_path: Path,
     output_path: Path,
+    rider: RiderProfile | None = None,
+    longueur_manivelle_mm: float = 172.5,
 ) -> None:
     """Génère le fichier HTML complet."""
     env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape=False)
@@ -94,5 +113,6 @@ def render(
         report=report,
         ann=_build_annotations(report),
         charts_json=_build_charts_json(angle_df),
+        rider=_build_rider_ctx(rider, longueur_manivelle_mm),
     )
     output_path.write_text(html, encoding="utf-8")

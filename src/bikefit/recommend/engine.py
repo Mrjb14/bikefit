@@ -10,6 +10,7 @@ import yaml
 
 from bikefit._paths import CONFIG_DIR
 from bikefit.equipment.models import BikeProfile
+from bikefit.equipment.rider import Flexibilite, RiderProfile
 from bikefit.kinematics.metrics import FitMetrics
 from bikefit.recommend.models import FitReport, Priorite, Recommendation
 
@@ -35,8 +36,9 @@ def run(
     metrics: FitMetrics,
     bike: BikeProfile,
     profile: str = "triathlon_XL",
+    rider: RiderProfile | None = None,
 ) -> FitReport:
-    """Génère les recommandations à partir des métriques et du profil vélo."""
+    """Génère les recommandations à partir des métriques, du vélo et du coureur."""
     targets, sensitivity = _load_targets(profile)
     recs: list[Recommendation] = []
     hors_cible: list[str] = []
@@ -195,6 +197,18 @@ def run(
     t = targets.get("tronc", {})
     val = metrics.tronc.mean
     t_min, t_max = t.get("min", 10), t.get("max", 22)
+
+    # Ajustement selon la flexibilité du coureur
+    flex_note = ""
+    if rider is not None and rider.profil.flexibilite is not None:
+        flex = rider.profil.flexibilite
+        if flex == Flexibilite.faible:
+            t_min = min(t_min + 5, t_max - 2)
+            flex_note = " (plancher relevé : flexibilité faible)"
+        elif flex == Flexibilite.excellente:
+            t_min = max(t_min - 3, 5)
+            flex_note = " (plancher abaissé : excellente flexibilité)"
+
     if not (t_min <= val <= t_max):
         direction = "monter" if val > t_max else "descendre"
         recs.append(
@@ -203,7 +217,7 @@ def run(
                 direction=direction,
                 delta_mm=None,
                 motif=(
-                    f"Angle de tronc hors plage ({val:.1f}°, cible {t_min}-{t_max}°). "
+                    f"Angle de tronc hors plage ({val:.1f}°, cible {t_min}-{t_max}°{flex_note}). "
                     f"Ajuster la hauteur des pads."
                 ),
                 priorite=Priorite.faible,
@@ -245,6 +259,29 @@ def run(
         )
     else:
         resume = f"{len(recs)} réglage(s) suggéré(s), aucun urgent."
+
+    # Contexte coureur — notes informatives
+    rider_notes: list[str] = []
+    if rider is not None:
+        selle_geo = rider.saddle_height_geo_mm(bike.longueur_manivelle_mm)
+        if selle_geo is not None:
+            rider_notes.append(f"Référence géométrique hauteur selle (LeMond) : ~{selle_geo} mm")
+        duree = rider.objectif.duree_effort_min
+        if duree is not None and duree >= 240:
+            rider_notes.append(
+                f"Effort long ({duree} min) — favoriser la conservation musculaire"
+                " sur l'agressivité aérodynamique."
+            )
+        if rider.objectif.type_epreuve is not None:
+            epreuve_profile = rider.objectif.type_epreuve
+            if epreuve_profile != profile:
+                rider_notes.append(
+                    f"Profil utilisé '{profile}' diffère du type d'épreuve cible"
+                    f" '{epreuve_profile}' dans les mensurations."
+                )
+
+    if rider_notes:
+        resume = resume + " | " + " | ".join(rider_notes)
 
     return FitReport(
         profil_utilise=profile,

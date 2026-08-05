@@ -16,6 +16,7 @@ class Session(BaseModel):
     date: datetime = Field(default_factory=datetime.now)
     video_path: str
     bike_name: str
+    rider_name: str | None = None
     profile: str
     setup: BikeSetup = Field(default_factory=BikeSetup)
     metrics: FitMetrics
