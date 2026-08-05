@@ -24,3 +24,7 @@ class FitMetrics(BaseModel):
     n_cycles_used: int
     detection_rate: float
     calibration: CalibrationResult | None = None
+    # Plan frontal (vue de face, Phase 3C) — absents si pas de vidéo face analysée
+    genou_deviation_gauche: AngleStats | None = None  # angle signé (degrés) par cycle
+    genou_deviation_droit: AngleStats | None = None  # angle signé (degrés) par cycle
+    largeur_coudes: AngleStats | None = None  # mm si calibration ArUco dispo, sinon None
