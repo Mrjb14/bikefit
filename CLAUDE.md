@@ -12,6 +12,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `config/rider/mensurations.yaml` : mensurations personnelles + objectif (Ironman 2027-05-21).
 - `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, Tasks API MediaPipe v1.0).
 - `docs/aruco_marker_100mm.png` : marqueur ArUco à imprimer (DICT_4X4_50 ID=0, 100 mm).
+- `data/` : vidéos pour les tests manuels du CLI (gitignorées, `*.mp4`).
 
 ## Principes non négociables
 1. **Précision avant tout** : chaque mesure est moyennée sur N cycles de pédalage,
@@ -96,10 +97,19 @@ python scripts/spike_bikefit.py video.mp4 --side right
 - Pas de dépendance GPU obligatoire : tout tourne sur CPU.
 - `ruff check` + `ruff format --check` obligatoires en CI (lint + format séparés).
 
+## Données runtime (~/.bikefit/)
+Les données générées pendant l'utilisation vivent dans `~/.bikefit/`, hors du repo :
+- `~/.bikefit/models/pose_landmarker_heavy.task` : modèle MediaPipe (téléchargé automatiquement si absent).
+- `~/.bikefit/cache/landmarks/` : landmarks Parquet par vidéo (clé md5, rejoué en < 1 s).
+- `~/.bikefit/sessions.db` : base SQLite des sessions (commandes `history`, `compare`).
+
+Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR`) et correspondent
+à la même racine `~/.bikefit/` que la base de sessions par défaut du CLI.
+
 ## Matériel de l'utilisateur (contexte capture)
 - Tacx Neo 2 (direct drive), smartphone 1080p/30fps, vue profil = source principale.
 - ESP32-CAM (basse résolution ~15-25 fps) — éventuelle vue de face (Phase 3C), flux MJPEG HTTP.
 - Le module ingest doit accepter : fichier vidéo ET flux réseau MJPEG.
-- Vidéos non versionnées (trop volumineuses) — gitignorées globalement.
+- Vidéos non versionnées (trop volumineuses) — dans `data/`, gitignorées.
 - Marqueur ArUco : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal côté caméra.
   Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.
