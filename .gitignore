@@ -25,7 +25,6 @@ cache/
 # Rapports générés
 reports/
 *.html
-!src/bikefit/report/templates/*.html
 
 # Conf Perso
 config/bikes/*

@@ -1,5 +1,7 @@
 # BikeFit CLM
 
+[![CI](https://github.com/Mrjb14/bikefit/actions/workflows/ci.yml/badge.svg)](https://github.com/Mrjb14/bikefit/actions/workflows/ci.yml)
+
 Analyse vidéo de position cycliste (contre-la-montre) par estimation de pose.
 Filme-toi sur home trainer (profil + face), obtiens des recommandations de
 réglage chiffrées en mm : hauteur/recul de selle, prolongateurs, poste de pilotage.
