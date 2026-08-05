@@ -15,6 +15,7 @@ _SUBCOMMANDS = {"analyze", "history", "compare", "measure-body", "measure-setup"
 def _inject_default_command() -> None:
     args = sys.argv[1:]
     if not args:
+        sys.argv.append("--help")
         return
     first = args[0]
     # Si le premier argument n'est pas un sous-commande connu ni une option,
