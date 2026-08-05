@@ -281,5 +281,154 @@ def compare(
     typer.echo("")
 
 
+@app.command("measure-body")
+def measure_body(
+    photo: Annotated[Path, typer.Argument(help="Photo debout du coureur (jpg/png)")],
+    rider: Annotated[
+        str, typer.Option(help="Fiche coureur dans config/rider/ (sans .yaml)")
+    ] = "mensurations",
+    write: Annotated[bool, typer.Option(help="Met à jour les champs null dans le YAML")] = False,
+) -> None:
+    """Estime les mensurations corporelles depuis une photo debout (MediaPipe)."""
+    from bikefit._paths import CONFIG_DIR
+    from bikefit.equipment import load_rider_profile
+    from bikefit.measure.body import estimate_body_measurements
+    from bikefit.measure.yaml_io import update_null_fields
+
+    if not photo.exists():
+        typer.echo(f"Erreur : photo introuvable : {photo}", err=True)
+        raise typer.Exit(1)
+
+    rider_profile = load_rider_profile(rider)
+    taille_mm = rider_profile.mensurations.taille if rider_profile else None
+    if taille_mm:
+        typer.echo(f"Taille connue : {taille_mm} mm — utilisée pour l'échelle.")
+    else:
+        typer.echo("Avertissement : taille non renseignée — estimations non calibrées.", err=True)
+
+    typer.echo("Détection de pose en cours...")
+    estimates = estimate_body_measurements(photo, taille_mm=taille_mm)
+
+    typer.echo("\nEstimations (mm) — précision indicative ±5-10% :")
+    for key, val in estimates.items():
+        typer.echo(f"  {key:<20} {val:>5} mm")
+
+    if write:
+        yaml_path = CONFIG_DIR / "rider" / f"{rider}.yaml"
+        if not yaml_path.exists():
+            typer.echo(f"Erreur : {yaml_path} introuvable.", err=True)
+            raise typer.Exit(1)
+        updated = update_null_fields(yaml_path, estimates)
+        if updated:
+            typer.echo(f"\n✓ {len(updated)} champ(s) mis à jour dans {yaml_path} : {updated}")
+        else:
+            typer.echo("\nAucun champ null à mettre à jour (déjà renseignés).")
+    else:
+        typer.echo(
+            "\nAjoutez --write pour mettre à jour automatiquement les champs null"
+            f" dans config/rider/{rider}.yaml"
+        )
+
+
+@app.command("measure-setup")
+def measure_setup(
+    video: Annotated[Path, typer.Argument(help="Vidéo de profil sur le home trainer")],
+    marker_size: Annotated[
+        float, typer.Option(help="Taille du marqueur ArUco en mm (obligatoire)")
+    ],
+    side: Annotated[str, typer.Option(help="right | left — côté filmé")] = "right",
+    bike: Annotated[str, typer.Option(help="Fiche vélo dans config/bikes/")] = "giant_trinity_2019",
+    write: Annotated[bool, typer.Option(help="Met à jour les champs null dans le YAML")] = False,
+    no_cache: Annotated[bool, typer.Option(help="Force le recalcul des landmarks")] = False,
+) -> None:
+    """Estime setup_actuel (hauteur selle, guidon, reach) depuis la vidéo + ArUco."""
+    from bikefit._paths import CONFIG_DIR
+    from bikefit.calibration import calibrate_from_video
+    from bikefit.ingest import VideoReader
+    from bikefit.measure.setup import estimate_bike_setup
+    from bikefit.measure.yaml_io import update_null_fields
+    from bikefit.pose import LandmarkCache, MediaPipePoseEstimator
+    from bikefit.pose.cache import CACHE_DIR
+
+    if not video.exists():
+        typer.echo(f"Erreur : vidéo introuvable : {video}", err=True)
+        raise typer.Exit(1)
+    if side not in ("right", "left"):
+        typer.echo("Erreur : --side doit être 'right' ou 'left'", err=True)
+        raise typer.Exit(1)
+
+    # ── Pose (avec cache) ─────────────────────────────────────────────────────
+    reader = VideoReader(video)
+    typer.echo(f"Vidéo : {reader.width}×{reader.height} @ {reader.fps:.1f} fps")
+
+    cache = LandmarkCache(CACHE_DIR / "landmarks")
+    if no_cache:
+        from bikefit.pose.cache import _video_key
+
+        key = _video_key(video)
+        cache_file = CACHE_DIR / "landmarks" / f"{video.stem}_{key}.parquet"
+        if cache_file.exists():
+            cache_file.unlink()
+
+    with MediaPipePoseEstimator() as estimator:
+        df = cache.get_or_compute(video, reader, estimator)
+
+    typer.echo(f"Détection pose : {df['detected'].mean():.1%} des frames")
+
+    # ── Calibration ArUco ─────────────────────────────────────────────────────
+    typer.echo(f"Calibration ArUco (marqueur {marker_size:.0f} mm)...")
+    calib = calibrate_from_video(str(video), marker_size_mm=marker_size)
+    if calib is None:
+        typer.echo("Erreur : aucun marqueur ArUco détecté. Vérifier --marker-size.", err=True)
+        raise typer.Exit(1)
+    status = "fiable" if calib.is_reliable else "peu fiable"
+    typer.echo(
+        f"Calibration {status} : {calib.mm_per_pixel:.4f} mm/px"
+        f" ({calib.n_detected}/{calib.n_sampled} frames)"
+    )
+
+    # ── Estimation du setup ───────────────────────────────────────────────────
+    typer.echo("Estimation du setup vélo (fit de cercle sur trajectoire cheville)...")
+    estimates = estimate_bike_setup(
+        df,
+        mm_per_pixel=calib.mm_per_pixel,
+        image_width=reader.width,
+        image_height=reader.height,
+        side=side,  # type: ignore[arg-type]
+    )
+
+    # Infos de debug
+    bb_px = estimates.pop("_bb_px")
+    rayon = estimates.pop("_rayon_cheville_mm")
+    typer.echo(f"  BB estimé : pixel ({bb_px[0]}, {bb_px[1]})")
+    typer.echo(f"  Rayon cheville ≈ {rayon} mm (manivelle + hauteur chaussure)")
+
+    typer.echo("\nEstimations setup_actuel (mm) — précision indicative ±20 mm :")
+    display = {k: v for k, v in estimates.items() if v is not None}
+    for key, val in display.items():
+        typer.echo(f"  {key:<24} {val:>5} mm")
+
+    typer.echo(
+        "\nNote : hauteur_selle_bb = BB → hanche au PMB (hanche ≠ sommet selle,"
+        " écart ≈ 30-50 mm selon selle/cuissard)."
+    )
+
+    if write:
+        yaml_path = CONFIG_DIR / "bikes" / f"{bike}.yaml"
+        if not yaml_path.exists():
+            typer.echo(f"Erreur : {yaml_path} introuvable.", err=True)
+            raise typer.Exit(1)
+        updated = update_null_fields(yaml_path, display)
+        if updated:
+            typer.echo(f"\n✓ {len(updated)} champ(s) mis à jour dans {yaml_path} : {updated}")
+        else:
+            typer.echo("\nAucun champ null à mettre à jour (déjà renseignés).")
+    else:
+        typer.echo(
+            f"\nAjoutez --write pour mettre à jour automatiquement les champs null"
+            f" dans config/bikes/{bike}.yaml"
+        )
+
+
 if __name__ == "__main__":
     app()

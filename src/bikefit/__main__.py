@@ -9,7 +9,7 @@ Permet d'appeler :
 
 import sys
 
-_SUBCOMMANDS = {"analyze", "history", "compare"}
+_SUBCOMMANDS = {"analyze", "history", "compare", "measure-body", "measure-setup"}
 
 
 def _inject_default_command() -> None:
