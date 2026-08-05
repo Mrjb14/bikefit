@@ -44,7 +44,7 @@ def estimate_body_measurements(
     wl = result.pose_world_landmarks[0]
 
     def _y(i: int) -> float:
-        return wl[i].y  # y=haut dans les world_landmarks MediaPipe
+        return wl[i].y  # y=bas dans les world_landmarks MediaPipe (même convention que les frames image)
 
     def _x(i: int) -> float:
         return wl[i].x
@@ -57,10 +57,10 @@ def estimate_body_measurements(
     nose_y = _y(0)
 
     raw_m: dict[str, float] = {
-        "entrejambe": hip_y - ankle_y,  # hanche → cheville
-        "longueur_femur": hip_y - knee_y,  # hanche → genou
-        "longueur_tibia": knee_y - ankle_y,  # genou → cheville
-        "longueur_buste": shoulder_y - hip_y,  # hanche → épaule (proxy buste)
+        "entrejambe": ankle_y - hip_y,  # hanche → cheville
+        "longueur_femur": knee_y - hip_y,  # hanche → genou
+        "longueur_tibia": ankle_y - knee_y,  # genou → cheville
+        "longueur_buste": hip_y - shoulder_y,  # hanche → épaule (proxy buste)
         "largeur_epaules": abs(_x(11) - _x(12)),
         "largeur_hanches": abs(_x(23) - _x(24)),
     }
@@ -68,7 +68,7 @@ def estimate_body_measurements(
     # Facteur d'échelle si taille connue
     scale = 1.0
     if taille_mm is not None:
-        nose_ankle_m = nose_y - ankle_y
+        nose_ankle_m = ankle_y - nose_y
         if nose_ankle_m > 0.1:
             scale = (taille_mm / 1000 * _NOSE_ANKLE_RATIO) / nose_ankle_m
 
