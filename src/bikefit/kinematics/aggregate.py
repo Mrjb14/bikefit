@@ -60,3 +60,52 @@ def aggregate_cycles(
         n_cycles_used=n_used,
         detection_rate=round(float(angle_df["genou"].notna().mean()), 3),
     )
+
+
+def aggregate_frontal_cycles(
+    frontal_df: pd.DataFrame,
+    cycles: list[tuple[int, int]],
+    mm_per_pixel: float | None = None,
+) -> dict[str, AngleStats]:
+    """Agrège les métriques plan frontal (Phase 3C) sur N cycles de pédalage.
+
+    Renvoie un dict avec les clés 'genou_deviation_gauche', 'genou_deviation_droit'
+    et, si mm_per_pixel est fourni (calibration ArUco), 'largeur_coudes' — prêt à
+    injecter dans les champs optionnels de FitMetrics.
+    """
+    per_cycle: list[dict] = []
+
+    for start, end in cycles:
+        mask = (frontal_df["frame_idx"] >= start) & (frontal_df["frame_idx"] <= end)
+        cyc = frontal_df[mask]
+
+        if cyc["genou_deviation_gauche"].isna().mean() > 0.10:
+            continue
+
+        per_cycle.append(
+            {
+                "genou_deviation_gauche": cyc["genou_deviation_gauche"].mean(),
+                "genou_deviation_droit": cyc["genou_deviation_droit"].mean(),
+                "largeur_coudes_px": cyc["largeur_coudes_px"].mean(),
+            }
+        )
+
+    if not per_cycle:
+        raise ValueError(
+            "Aucun cycle plan frontal valide trouvé."
+            " Vérifiez la qualité de détection et le cadrage."
+        )
+
+    stats_df = pd.DataFrame(per_cycle)
+    n_used = len(stats_df)
+
+    result: dict[str, AngleStats] = {
+        "genou_deviation_gauche": _stats(stats_df["genou_deviation_gauche"], n_used),
+        "genou_deviation_droit": _stats(stats_df["genou_deviation_droit"], n_used),
+    }
+
+    if mm_per_pixel is not None:
+        largeur_mm = stats_df["largeur_coudes_px"] * mm_per_pixel
+        result["largeur_coudes"] = _stats(largeur_mm, n_used)
+
+    return result
