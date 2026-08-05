@@ -6,14 +6,40 @@ on:
   pull_request:
 
 jobs:
-  test:
+  lint:
+    name: Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install
-        run: uv sync --all-extras
-      - name: Lint
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install dev deps
+        run: uv sync --extra dev
+
+      - name: Ruff — vérification des règles
         run: uv run ruff check src tests scripts
-      - name: Tests
-        run: uv run pytest
+
+      - name: Ruff — vérification du formatage
+        run: uv run ruff format --check src tests scripts
+
+  tests:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install deps
+        run: uv sync --extra dev
+
+      - name: Pytest + couverture
+        run: uv run pytest --cov=src/bikefit --cov-report=term-missing

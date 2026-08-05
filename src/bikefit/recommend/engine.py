@@ -3,9 +3,8 @@
 Logique purement déclarative — pas de ML.
 Chaque règle mappe un écart angulaire à un réglage et un delta_mm.
 """
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 import yaml
 
@@ -58,31 +57,35 @@ def run(
             and bike.setup_actuel.hauteur_selle_bb - (delta_mm or 0)
             < bike.plages_reglage.hauteur_selle.min
         )
-        recs.append(Recommendation(
-            reglage="hauteur_selle",
-            direction="descendre",
-            delta_mm=delta_mm,
-            motif=(
-                f"Genou trop étendu au PMB ({val:.1f}° > {t_max}°). "
-                f"La selle est probablement trop haute."
-            ),
-            priorite=Priorite.haute,
-            butee_atteinte=butee,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="hauteur_selle",
+                direction="descendre",
+                delta_mm=delta_mm,
+                motif=(
+                    f"Genou trop étendu au PMB ({val:.1f}° > {t_max}°). "
+                    f"La selle est probablement trop haute."
+                ),
+                priorite=Priorite.haute,
+                butee_atteinte=butee,
+            )
+        )
         hors_cible.append("genou_extension_pmb")
     elif val < t_min:
         delta_deg = t_opt - val
         delta_mm = _delta_to_mm(delta_deg, coeff)
-        recs.append(Recommendation(
-            reglage="hauteur_selle",
-            direction="monter",
-            delta_mm=delta_mm,
-            motif=(
-                f"Genou trop fléchi au PMB ({val:.1f}° < {t_min}°). "
-                f"La selle est probablement trop basse."
-            ),
-            priorite=Priorite.haute,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="hauteur_selle",
+                direction="monter",
+                delta_mm=delta_mm,
+                motif=(
+                    f"Genou trop fléchi au PMB ({val:.1f}° < {t_min}°). "
+                    f"La selle est probablement trop basse."
+                ),
+                priorite=Priorite.haute,
+            )
+        )
         hors_cible.append("genou_extension_pmb")
     else:
         ok.append("genou_extension_pmb")
@@ -93,16 +96,18 @@ def run(
     t_min, t_max = t.get("min", 65), t.get("max", 78)
     if not (t_min <= val <= t_max):
         direction = "reculer" if val < t_min else "avancer"
-        recs.append(Recommendation(
-            reglage="recul_selle",
-            direction=direction,
-            delta_mm=None,
-            motif=(
-                f"Angle genou PMH hors plage ({val:.1f}°, cible {t_min}-{t_max}°). "
-                f"Ajuster le recul de selle."
-            ),
-            priorite=Priorite.moyenne,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="recul_selle",
+                direction=direction,
+                delta_mm=None,
+                motif=(
+                    f"Angle genou PMH hors plage ({val:.1f}°, cible {t_min}-{t_max}°). "
+                    f"Ajuster le recul de selle."
+                ),
+                priorite=Priorite.moyenne,
+            )
+        )
         hors_cible.append("genou_flexion_pmh")
     else:
         ok.append("genou_flexion_pmh")
@@ -116,30 +121,34 @@ def run(
     if val < t_min:
         delta_deg = t_opt - val
         delta_mm = _delta_to_mm(delta_deg, coeff)
-        recs.append(Recommendation(
-            reglage="hauteur_prolongateurs",
-            direction="monter",
-            delta_mm=delta_mm,
-            motif=(
-                f"Hanche trop fermée au PMH ({val:.1f}° < {t_min}°). "
-                f"Remonter les pads/prolongateurs pour ouvrir la hanche."
-            ),
-            priorite=Priorite.moyenne,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="hauteur_prolongateurs",
+                direction="monter",
+                delta_mm=delta_mm,
+                motif=(
+                    f"Hanche trop fermée au PMH ({val:.1f}° < {t_min}°). "
+                    f"Remonter les pads/prolongateurs pour ouvrir la hanche."
+                ),
+                priorite=Priorite.moyenne,
+            )
+        )
         hors_cible.append("hanche_fermee_pmh")
     elif val > t_max:
         delta_deg = val - t_opt
         delta_mm = _delta_to_mm(delta_deg, coeff)
-        recs.append(Recommendation(
-            reglage="hauteur_prolongateurs",
-            direction="descendre",
-            delta_mm=delta_mm,
-            motif=(
-                f"Hanche trop ouverte au PMH ({val:.1f}° > {t_max}°). "
-                f"Descendre les pads pour fermer la hanche."
-            ),
-            priorite=Priorite.faible,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="hauteur_prolongateurs",
+                direction="descendre",
+                delta_mm=delta_mm,
+                motif=(
+                    f"Hanche trop ouverte au PMH ({val:.1f}° > {t_max}°). "
+                    f"Descendre les pads pour fermer la hanche."
+                ),
+                priorite=Priorite.faible,
+            )
+        )
         hors_cible.append("hanche_fermee_pmh")
     else:
         ok.append("hanche_fermee_pmh")
@@ -153,30 +162,31 @@ def run(
     if val > t_max:
         delta_deg = val - t_opt
         delta_mm = _delta_to_mm(delta_deg, coeff)
-        recs.append(Recommendation(
-            reglage="longueur_prolongateurs",
-            direction="raccourcir",
-            delta_mm=delta_mm,
-            motif=(
-                f"Coude trop ouvert ({val:.1f}° > {t_max}°). "
-                f"Raccourcir les prolongateurs ou avancer les pads."
-            ),
-            priorite=Priorite.haute,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="longueur_prolongateurs",
+                direction="raccourcir",
+                delta_mm=delta_mm,
+                motif=(
+                    f"Coude trop ouvert ({val:.1f}° > {t_max}°). "
+                    f"Raccourcir les prolongateurs ou avancer les pads."
+                ),
+                priorite=Priorite.haute,
+            )
+        )
         hors_cible.append("coude")
     elif val < t_min:
         delta_deg = t_opt - val
         delta_mm = _delta_to_mm(delta_deg, coeff)
-        recs.append(Recommendation(
-            reglage="longueur_prolongateurs",
-            direction="allonger",
-            delta_mm=delta_mm,
-            motif=(
-                f"Coude trop fléchi ({val:.1f}° < {t_min}°). "
-                f"Allonger les prolongateurs."
-            ),
-            priorite=Priorite.moyenne,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="longueur_prolongateurs",
+                direction="allonger",
+                delta_mm=delta_mm,
+                motif=(f"Coude trop fléchi ({val:.1f}° < {t_min}°). Allonger les prolongateurs."),
+                priorite=Priorite.moyenne,
+            )
+        )
         hors_cible.append("coude")
     else:
         ok.append("coude")
@@ -187,16 +197,18 @@ def run(
     t_min, t_max = t.get("min", 10), t.get("max", 22)
     if not (t_min <= val <= t_max):
         direction = "monter" if val > t_max else "descendre"
-        recs.append(Recommendation(
-            reglage="hauteur_prolongateurs",
-            direction=direction,
-            delta_mm=None,
-            motif=(
-                f"Angle de tronc hors plage ({val:.1f}°, cible {t_min}-{t_max}°). "
-                f"Ajuster la hauteur des pads."
-            ),
-            priorite=Priorite.faible,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="hauteur_prolongateurs",
+                direction=direction,
+                delta_mm=None,
+                motif=(
+                    f"Angle de tronc hors plage ({val:.1f}°, cible {t_min}-{t_max}°). "
+                    f"Ajuster la hauteur des pads."
+                ),
+                priorite=Priorite.faible,
+            )
+        )
         hors_cible.append("tronc")
     else:
         ok.append("tronc")
@@ -206,16 +218,18 @@ def run(
     val = metrics.cheville_pmb.mean
     t_min, t_max = t.get("min", 128), t.get("max", 148)
     if not (t_min <= val <= t_max):
-        recs.append(Recommendation(
-            reglage="cale_chaussure",
-            direction="ajuster",
-            delta_mm=None,
-            motif=(
-                f"Cheville hors plage au PMB ({val:.1f}°, cible {t_min}-{t_max}°). "
-                f"Vérifier la position de cale / technique de pédalage."
-            ),
-            priorite=Priorite.faible,
-        ))
+        recs.append(
+            Recommendation(
+                reglage="cale_chaussure",
+                direction="ajuster",
+                delta_mm=None,
+                motif=(
+                    f"Cheville hors plage au PMB ({val:.1f}°, cible {t_min}-{t_max}°). "
+                    f"Vérifier la position de cale / technique de pédalage."
+                ),
+                priorite=Priorite.faible,
+            )
+        )
         hors_cible.append("cheville_pmb")
     else:
         ok.append("cheville_pmb")

@@ -64,22 +64,36 @@ def ensure_model() -> Path:
 # ---------------------------------------------------------------------------
 LANDMARKS = {
     "right": {
-        "shoulder": 12, "elbow": 14, "wrist": 16,
-        "hip": 24, "knee": 26, "ankle": 28,
-        "heel": 30, "foot": 32,
+        "shoulder": 12,
+        "elbow": 14,
+        "wrist": 16,
+        "hip": 24,
+        "knee": 26,
+        "ankle": 28,
+        "heel": 30,
+        "foot": 32,
     },
     "left": {
-        "shoulder": 11, "elbow": 13, "wrist": 15,
-        "hip": 23, "knee": 25, "ankle": 27,
-        "heel": 29, "foot": 31,
+        "shoulder": 11,
+        "elbow": 13,
+        "wrist": 15,
+        "hip": 23,
+        "knee": 25,
+        "ankle": 27,
+        "heel": 29,
+        "foot": 31,
     },
 }
 
 # Segments à dessiner (paires de noms de points)
 SKELETON = [
-    ("shoulder", "elbow"), ("elbow", "wrist"),
-    ("shoulder", "hip"), ("hip", "knee"),
-    ("knee", "ankle"), ("ankle", "heel"), ("heel", "foot"),
+    ("shoulder", "elbow"),
+    ("elbow", "wrist"),
+    ("shoulder", "hip"),
+    ("hip", "knee"),
+    ("knee", "ankle"),
+    ("ankle", "heel"),
+    ("heel", "foot"),
 ]
 
 # Angles à calculer : nom -> (point A, sommet, point B)
@@ -118,8 +132,12 @@ def trunk_angle(shoulder: np.ndarray, hip: np.ndarray) -> float:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Spike bike fitting MediaPipe")
     parser.add_argument("video", type=Path, help="Vidéo de profil (mp4/mov)")
-    parser.add_argument("--side", choices=["right", "left"], default="right",
-                        help="Côté du corps face à la caméra (défaut: right)")
+    parser.add_argument(
+        "--side",
+        choices=["right", "left"],
+        default="right",
+        help="Côté du corps face à la caméra (défaut: right)",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("spike_output"))
     args = parser.parse_args()
 
@@ -136,20 +154,21 @@ def main() -> None:
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     print(f"Vidéo : {width}x{height} @ {fps:.1f} fps, {n_frames} frames")
     if fps < 50:
-        print("⚠️  fps < 50 : acceptable pour le spike, mais vise 60 fps "
-              "pour les mesures finales.")
+        print("⚠️  fps < 50 : acceptable pour le spike, mais vise 60 fps pour les mesures finales.")
 
     writer = cv2.VideoWriter(
         str(args.output_dir / "annotated.mp4"),
-        cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (width, height),
     )
 
     # --- MediaPipe Tasks API (v1.0+)
     model_path = ensure_model()
-    PoseLandmarker = mp.tasks.vision.PoseLandmarker
-    PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
-    BaseOptions = mp.tasks.BaseOptions
-    VisionRunningMode = mp.tasks.vision.RunningMode
+    PoseLandmarker = mp.tasks.vision.PoseLandmarker  # noqa: N806
+    PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions  # noqa: N806
+    BaseOptions = mp.tasks.BaseOptions  # noqa: N806
+    VisionRunningMode = mp.tasks.vision.RunningMode  # noqa: N806
 
     options = PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=str(model_path)),
@@ -213,14 +232,21 @@ def main() -> None:
                 for aname in ("genou", "hanche", "coude", "tronc"):
                     val = arow[aname]
                     txt = f"{aname}: {val:.0f} deg"
-                    cv2.putText(frame, txt, (20, y0),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5)
-                    cv2.putText(frame, txt, (20, y0),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+                    cv2.putText(frame, txt, (20, y0), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5)
+                    cv2.putText(
+                        frame, txt, (20, y0), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2
+                    )
                     y0 += 40
             else:
-                cv2.putText(frame, "POSE NON DETECTEE", (20, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
+                cv2.putText(
+                    frame,
+                    "POSE NON DETECTEE",
+                    (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.5,
+                    (0, 0, 255),
+                    4,
+                )
 
             writer.write(frame)
             frame_idx += 1
@@ -231,8 +257,7 @@ def main() -> None:
     writer.release()
 
     if not angle_rows:
-        sys.exit("Aucune pose détectée sur toute la vidéo. "
-                 "Revoir éclairage / cadrage / contraste.")
+        sys.exit("Aucune pose détectée sur toute la vidéo. Revoir éclairage / cadrage / contraste.")
 
     # ------------------------------------------------------------------
     # Exports CSV
@@ -292,13 +317,14 @@ def main() -> None:
     for aname, s in summary["angles"].items():
         target = TARGETS.get(aname)
         tstr = f"   [cible CLM ~{target[0]}-{target[1]}°]" if target else ""
-        print(f"  {aname:10s} {s['min']:6.1f} / {s['max']:6.1f} / "
-              f"{s['moyenne']:6.1f} ± {s['ecart_type']:.1f}{tstr}")
+        print(
+            f"  {aname:10s} {s['min']:6.1f} / {s['max']:6.1f} / "
+            f"{s['moyenne']:6.1f} ± {s['ecart_type']:.1f}{tstr}"
+        )
 
     print("\nVerdict :")
     hip_knee_ankle_ok = all(
-        summary["visibilite_moyenne"].get(n, 0) > 0.8
-        for n in ("hip", "knee", "ankle")
+        summary["visibilite_moyenne"].get(n, 0) > 0.8 for n in ("hip", "knee", "ankle")
     )
     if hip_knee_ankle_ok and detection_rate > 0.95:
         print("  ✅ Conditions de capture exploitables — GO pour la Phase 1.")

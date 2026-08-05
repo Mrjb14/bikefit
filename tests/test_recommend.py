@@ -1,5 +1,4 @@
 """Tests du moteur de recommandations sur des FitMetrics synthétiques."""
-import pytest
 
 from bikefit.equipment.models import BikeModel, BikeProfile
 from bikefit.kinematics.metrics import AngleStats, FitMetrics
@@ -64,10 +63,18 @@ class TestRecommendGenou:
         assert rec.direction == "monter"
 
     def test_delta_mm_proportionnel(self) -> None:
-        report_petit = recommend(_metrics(genou_extension_pmb=151.0), _bike(), profile="triathlon_XL")
-        report_grand  = recommend(_metrics(genou_extension_pmb=158.0), _bike(), profile="triathlon_XL")
-        delta_petit = next(r for r in report_petit.recommandations if r.reglage == "hauteur_selle").delta_mm
-        delta_grand  = next(r for r in report_grand.recommandations  if r.reglage == "hauteur_selle").delta_mm
+        report_petit = recommend(
+            _metrics(genou_extension_pmb=151.0), _bike(), profile="triathlon_XL"
+        )
+        report_grand = recommend(
+            _metrics(genou_extension_pmb=158.0), _bike(), profile="triathlon_XL"
+        )
+        delta_petit = next(
+            r for r in report_petit.recommandations if r.reglage == "hauteur_selle"
+        ).delta_mm
+        delta_grand = next(
+            r for r in report_grand.recommandations if r.reglage == "hauteur_selle"
+        ).delta_mm
         assert delta_grand > delta_petit  # type: ignore[operator]
 
 
@@ -97,5 +104,7 @@ class TestRecommendHanche:
 
 class TestRecommendResume:
     def test_resume_mentionne_prioritaires(self) -> None:
-        report = recommend(_metrics(genou_extension_pmb=155.0, coude=120.0), _bike(), profile="triathlon_XL")
+        report = recommend(
+            _metrics(genou_extension_pmb=155.0, coude=120.0), _bike(), profile="triathlon_XL"
+        )
         assert "prioritaire" in report.resume.lower()

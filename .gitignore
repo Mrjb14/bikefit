@@ -35,3 +35,9 @@ config/rider/*
 .DS_Store
 .idea/
 .vscode/
+
+# Logs
+*.log   
+
+# Autres
+ideacomsa

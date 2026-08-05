@@ -30,14 +30,16 @@ def aggregate_cycles(
         if cyc["genou"].isna().mean() > 0.10:
             continue
 
-        per_cycle.append({
-            "genou_ext": cyc["genou"].max(),
-            "genou_flex": cyc["genou"].min(),
-            "hanche_fermee": cyc["hanche"].min(),
-            "tronc": cyc["tronc"].mean(),
-            "coude": cyc["coude"].mean(),
-            "cheville_pmb": cyc["cheville"].max(),
-        })
+        per_cycle.append(
+            {
+                "genou_ext": cyc["genou"].max(),
+                "genou_flex": cyc["genou"].min(),
+                "hanche_fermee": cyc["hanche"].min(),
+                "tronc": cyc["tronc"].mean(),
+                "coude": cyc["coude"].mean(),
+                "cheville_pmb": cyc["cheville"].max(),
+            }
+        )
 
     if not per_cycle:
         raise ValueError(

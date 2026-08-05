@@ -35,8 +35,5 @@ def detect_cycles(
     if len(pmb_indices) < 2:
         return []
 
-    cycles = [
-        (int(pmb_indices[i]), int(pmb_indices[i + 1]))
-        for i in range(len(pmb_indices) - 1)
-    ]
+    cycles = [(int(pmb_indices[i]), int(pmb_indices[i + 1])) for i in range(len(pmb_indices) - 1)]
     return cycles

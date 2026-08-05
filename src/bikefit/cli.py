@@ -1,4 +1,5 @@
 """CLI BikeFit — Phase 1 & 2."""
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,9 @@ def analyze(
     view: Annotated[str, typer.Option(help="side | front")] = "side",
     bike: Annotated[str, typer.Option(help="Fiche vélo dans config/bikes/")] = "giant_trinity_2019",
     side: Annotated[str, typer.Option(help="right | left — côté filmé")] = "right",
-    profile: Annotated[str, typer.Option(help="Profil cible : triathlon_XL | clm_long | clm_court")] = "triathlon_XL",
+    profile: Annotated[
+        str, typer.Option(help="Profil cible : triathlon_XL | clm_long | clm_court")
+    ] = "triathlon_XL",
     output: Annotated[Path | None, typer.Option(help="Fichier JSON de sortie")] = None,
     report: Annotated[Path | None, typer.Option(help="Rapport HTML de sortie")] = None,
     no_cache: Annotated[bool, typer.Option(help="Force le recalcul des landmarks")] = False,
@@ -45,12 +48,16 @@ def analyze(
 
     # ── Ingest ───────────────────────────────────────────────────────────────
     reader = VideoReader(video)
-    typer.echo(f"Vidéo : {reader.width}x{reader.height} @ {reader.fps:.1f} fps, {reader.frame_count} frames")
+    typer.echo(
+        f"Vidéo : {reader.width}x{reader.height}"
+        f" @ {reader.fps:.1f} fps, {reader.frame_count} frames"
+    )
 
     # ── Pose (avec cache Parquet) ─────────────────────────────────────────────
     cache = LandmarkCache(CACHE_DIR / "landmarks")
     if no_cache:
         from bikefit.pose.cache import _video_key
+
         key = _video_key(video)
         cache_file = CACHE_DIR / "landmarks" / f"{video.stem}_{key}.parquet"
         if cache_file.exists():
@@ -78,8 +85,12 @@ def analyze(
     try:
         bike_profile = load_bike_profile(bike)
     except FileNotFoundError:
-        typer.echo(f"Avertissement : fiche vélo '{bike}' introuvable, recommandations sans butées.", err=True)
+        typer.echo(
+            f"Avertissement : fiche vélo '{bike}' introuvable, recommandations sans butées.",
+            err=True,
+        )
         from bikefit.equipment.models import BikeModel, BikeProfile
+
         bike_profile = BikeProfile(modele=BikeModel(marque="", nom=bike, annee=0, taille=""))
 
     # ── Recommandations ──────────────────────────────────────────────────────
@@ -94,18 +105,18 @@ def analyze(
 
     if output:
         output.write_text(json_str, encoding="utf-8")
-        typer.echo(f"Métriques sauvegardées → {output}")
+        typer.echo(f"Métriques sauvegardées -> {output}")
     else:
         typer.echo("\n" + json_str)
 
     # ── Rapport HTML ─────────────────────────────────────────────────────────
     if report:
         render_html(metrics, fit_report, angle_df, video, report)
-        typer.echo(f"Rapport HTML → {report}")
+        typer.echo(f"Rapport HTML -> {report}")
     else:
         default_report = video.with_suffix(".html")
         render_html(metrics, fit_report, angle_df, video, default_report)
-        typer.echo(f"Rapport HTML → {default_report}")
+        typer.echo(f"Rapport HTML -> {default_report}")
 
 
 if __name__ == "__main__":

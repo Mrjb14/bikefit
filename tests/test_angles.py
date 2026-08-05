@@ -1,7 +1,7 @@
 """Tests unitaires — angles sur squelettes synthétiques aux valeurs connues."""
+
 import numpy as np
 import pandas as pd
-import pytest
 
 from bikefit.kinematics.angles import _trunk_angle, _vec_angle, compute_angles
 
@@ -65,6 +65,7 @@ class TestTrunkAngle:
     def test_clm_position(self) -> None:
         # Position CLM typique : tronc ~15° / horizontale
         import math
+
         dx = 100.0
         dy = -math.tan(math.radians(15)) * dx  # dy négatif = shoulder plus haut que hip
         shoulder = np.array([[dx, 100.0 + dy]])
@@ -89,11 +90,11 @@ class TestComputeAngles:
                 row[f"lm_{j}_vis"] = 1.0
             # hanche (24), genou (26), cheville (28) alignés verticalement
             row["lm_24_x"] = 0.5
-            row["lm_24_y"] = 0.2   # hanche
+            row["lm_24_y"] = 0.2  # hanche
             row["lm_26_x"] = 0.5
-            row["lm_26_y"] = 0.5   # genou
+            row["lm_26_y"] = 0.5  # genou
             row["lm_28_x"] = 0.5
-            row["lm_28_y"] = 0.8   # cheville
+            row["lm_28_y"] = 0.8  # cheville
             rows.append(row)
         return pd.DataFrame(rows)
 

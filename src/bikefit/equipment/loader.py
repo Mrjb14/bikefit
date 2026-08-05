@@ -1,7 +1,8 @@
 """Chargement d'un profil vélo depuis un fichier YAML."""
+
 from __future__ import annotations
 
-from pathlib import Path
+import contextlib
 
 import yaml
 
@@ -18,10 +19,8 @@ def load_bike_profile(name: str) -> BikeProfile:
 
     # Extrait longueur manivelle depuis la transmission si présente
     manivelle = 172.5
-    try:
+    with contextlib.suppress(KeyError, TypeError):
         manivelle = float(data["transmission"]["pedalier"]["longueur_manivelles"])
-    except (KeyError, TypeError):
-        pass
 
     return BikeProfile(
         modele=data["modele"],

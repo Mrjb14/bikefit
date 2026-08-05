@@ -40,7 +40,7 @@ class MediaPipePoseEstimator:
         )
         self._landmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
 
-    def __enter__(self) -> "MediaPipePoseEstimator":
+    def __enter__(self) -> MediaPipePoseEstimator:
         return self
 
     def __exit__(
@@ -65,10 +65,7 @@ class MediaPipePoseEstimator:
             )
 
         lms = result.pose_landmarks[0]
-        landmarks = [
-            Landmark(x=lm.x, y=lm.y, z=lm.z, visibility=lm.visibility)
-            for lm in lms
-        ]
+        landmarks = [Landmark(x=lm.x, y=lm.y, z=lm.z, visibility=lm.visibility) for lm in lms]
         return FrameLandmarks(
             timestamp_ms=timestamp_ms,
             frame_idx=frame_idx,
