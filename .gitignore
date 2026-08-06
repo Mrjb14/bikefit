@@ -17,6 +17,8 @@ htmlcov/
 *.parquet
 *.sqlite
 *.db
+# Sorties d'analyse (--output) : artefacts de run, pas du code
+data/
 
 # Rapports générés
 reports/

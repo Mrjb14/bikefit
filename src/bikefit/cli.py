@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from bikefit.kinematics.landmarks import Side
 
 app = typer.Typer(help="Analyse vidéo de position cycliste (CLM)")
@@ -42,6 +44,46 @@ _FRONT_HUD_COLUMNS: list[tuple[str, str, str]] = [
 ]
 
 
+def _trim_landmarks(
+    df: pd.DataFrame,
+    fps: float,
+    start_s: float | None,
+    end_s: float | None,
+    label: str,
+) -> pd.DataFrame:
+    """Restreint les landmarks à l'intervalle [start_s, end_s] (secondes).
+
+    Appliqué APRÈS le cache : les landmarks de la vidéo entière restent calculés une
+    seule fois, changer les bornes se rejoue instantanément (principe de cache du
+    projet). `frame_idx` est conservé tel quel — c'est la clé de découpage utilisée
+    en aval par aggregate_cycles.
+    """
+    if start_s is None and end_s is None:
+        return df
+
+    lo = int((start_s or 0.0) * fps)
+    hi = int(end_s * fps) if end_s is not None else None
+
+    mask = df["frame_idx"] >= lo
+    if hi is not None:
+        mask &= df["frame_idx"] < hi
+    trimmed = df[mask]
+
+    if trimmed.empty:
+        typer.echo(
+            f"Erreur : l'intervalle demandé ne contient aucune frame ({label}).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    kept_s = len(trimmed) / fps if fps > 0 else 0.0
+    typer.echo(
+        f"  Découpage {label} : {len(trimmed)}/{len(df)} frames conservées"
+        f" (~{kept_s:.0f}s, de {lo / fps:.0f}s)"
+    )
+    return trimmed
+
+
 @app.command()
 def analyze(
     video: Annotated[
@@ -64,6 +106,22 @@ def analyze(
         float,
         typer.Option(help="Durée de capture (s) si --front est un flux réseau ou une webcam"),
     ] = 15.0,
+    start: Annotated[
+        float | None,
+        typer.Option(help="Ignore les N premières secondes de la vidéo de profil (fichier)"),
+    ] = None,
+    end: Annotated[
+        float | None,
+        typer.Option(help="Ignore la vidéo de profil au-delà de N secondes (fichier)"),
+    ] = None,
+    front_start: Annotated[
+        float | None,
+        typer.Option(help="Ignore les N premières secondes de la vidéo de face (fichier)"),
+    ] = None,
+    front_end: Annotated[
+        float | None,
+        typer.Option(help="Ignore la vidéo de face au-delà de N secondes (fichier)"),
+    ] = None,
     debug_video: Annotated[
         Path | None,
         typer.Option(help="Vidéo de debug (squelette + angles superposés) pour la vue de profil"),
@@ -172,6 +230,9 @@ def analyze(
 
             df = cache.get_or_compute(video_path, reader, estimator)
 
+    if not video_is_live:
+        df = _trim_landmarks(df, reader.fps, start, end, "profil")
+
     detection_rate = df["detected"].mean()
     typer.echo(f"Taux de détection : {detection_rate:.1%}")
 
@@ -263,6 +324,9 @@ def analyze(
             else:
                 front_cache = LandmarkCache(CACHE_DIR / "landmarks")
                 front_df = front_cache.get_or_compute(Path(front), front_reader, front_estimator)
+
+        if not front_reader.is_live:
+            front_df = _trim_landmarks(front_df, front_reader.fps, front_start, front_end, "face")
 
         front_detection_rate = front_df["detected"].mean()
         typer.echo(f"  Taux de détection : {front_detection_rate:.1%}")
