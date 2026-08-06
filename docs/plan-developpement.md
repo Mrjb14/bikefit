@@ -35,8 +35,11 @@ Logiciel d'analyse vidéo pour le réglage d'un vélo de contre-la-montre, basé
 
 ### 2.1 Module Ingestion vidéo — ✅ implémenté
 - `VideoReader` : lit fps/width/height/frame_count à l'init, itérateur `frames()` → `TimedFrame`.
-- Entrée : fichiers vidéo (mp4/mov). Flux MJPEG réseau prévu Phase 3C.
-- Horodatage : `timestamp_ms = frame_idx * 1000 / fps`.
+- Entrée : fichiers vidéo (mp4/mov) **ou flux réseau MJPEG** (`http(s)://`/`rtsp://`, ex. ESP32-CAM,
+  Phase 3C) — détection auto du préfixe, parsing manuel des marqueurs JPEG SOI/EOI (le multipart
+  MJPEG d'un petit serveur maison n'est pas lu de façon fiable par `cv2.VideoCapture`/FFmpeg).
+- Horodatage fichier : `timestamp_ms = frame_idx * 1000 / fps`. Horodatage flux réseau : horloge
+  murale au moment de la capture (fps déclaré par la source non fiable).
 
 ### 2.2 Module Pose Estimation — ✅ implémenté
 - Moteur : **MediaPipe Pose Tasks API v1.0** (`pose_landmarker_heavy`, `VisionRunningMode.VIDEO`).
@@ -54,10 +57,14 @@ Logiciel d'analyse vidéo pour le réglage d'un vélo de contre-la-montre, basé
 - Dictionnaire : `DICT_4X4_50`, marqueur ID=0. Fichier à imprimer : `docs/aruco_marker_100mm.png`.
 - Activé par `--marker-size <mm>` sur la CLI ; stocké dans `FitMetrics.calibration`.
 
+**Approche intermédiaire déjà livrée (`measure-setup`, cf. 2.10)** : plutôt qu'un 2ᵉ marqueur ArUco
+sur le BB, le centre du BB est estimé par fit de cercle (Kåsa) sur la trajectoire de la cheville sur
+l'ensemble de la vidéo — un seul marqueur (calibration mm/px) suffit. Précision indicative ±20 mm,
+à valider au mètre ruban (critère de succès Phase 3A+ : ArUco ≈ ruban à ± 5 mm — pas encore atteint).
+
 **À venir (Phase 3A+) :**
-- 2ᵉ marqueur ArUco (ID=1) positionné sur le BB.
-- Mesure automatique depuis la vidéo : hauteur de selle (BB→selle), reach (BB→extensions), stack.
-- Remplissage automatique de `BikeSetup` — plus besoin de mètre ruban.
+- 2ᵉ marqueur ArUco (ID=1) positionné sur le BB, pour une mesure plus précise que le fit de cercle.
+- Remplissage automatique de `BikeSetup` avec validation ± 5 mm — plus besoin de mètre ruban.
 - Calibration personnalisée des coefficients de sensibilité (°/mm) à partir des sessions réelles.
 
 ### 2.4 Module Analyse cinématique — ✅ implémenté
@@ -84,8 +91,13 @@ Logiciel d'analyse vidéo pour le réglage d'un vélo de contre-la-montre, basé
 
 ### 2.7 Rapport & Export — ✅ implémenté
 - `render_html(metrics, report, angle_df, video_path, output_path)`.
-- Template Jinja2 — dark theme, responsive, CDN Plotly (autonome, sans serveur).
-- 5 graphes d'angles empilés (`scattergl`), schéma SVG du vélo avec annotations colorées par priorité.
+- Template Jinja2 — dark theme, responsive, CDN Plotly (autonome, sans serveur). Autoescape HTML
+  activé (le JSON des graphes, seule donnée non textuelle injectée, passe par un filtre `|safe`
+  explicite dans le template).
+- 5 graphes d'angles empilés (`scattergl`), schéma SVG du vélo de profil avec annotations colorées
+  par priorité, + schéma SVG vue de face (Phase 3C : roue en tranche, cintre symétrique) avec
+  annotations optionnelles (déviation genoux, largeur coudes) si les métriques plan frontal sont
+  présentes dans `FitMetrics`.
 - Tableau des métriques vert/rouge selon plages cibles.
 
 ### 2.8 Storage — ✅ implémenté
@@ -97,8 +109,25 @@ Logiciel d'analyse vidéo pour le réglage d'un vélo de contre-la-montre, basé
 
 ### 2.9 Interface utilisateur
 - **v1 : CLI** (`python -m bikefit video.mp4 --side right`) — ✅ implémentée.
-  3 commandes Typer : `analyze` (défaut), `history`, `compare`.
+  5 commandes Typer : `analyze` (défaut, avec `--front` pour la vue de face), `history`, `compare`,
+  `measure-body`, `measure-setup`.
 - **v2 : UI web locale** (Streamlit) — Phase 4 optionnelle.
+
+### 2.10 Module Measure (bootstrap YAML) — ✅ implémenté
+- Objectif : remplir un premier jet des YAML personnels (`config/rider/`, `config/bikes/`) sans
+  sortir le mètre ruban à chaque itération, à valider ensuite au ruban (voir `docs/procedure-mesures.md`).
+- `estimate_body_measurements` (`measure-body`) : photo debout, MediaPipe en mode IMAGE
+  (`pose_world_landmarks` 3D), mise à l'échelle via le ratio nez→cheville / taille si `taille` connue.
+  Précision indicative ±5-10 %.
+- `estimate_bike_setup` (`measure-setup`) : vidéo + calibration ArUco, fit de cercle de Kåsa sur la
+  trajectoire de la cheville → centre BB, puis projection pour `hauteur_selle_bb`,
+  `hauteur_guidon_bb`, `reach_prolongateurs`. Précision indicative ±20 mm.
+- `update_null_fields` (`yaml_io.py`) : réécrit uniquement les champs `null` d'un YAML existant,
+  commentaires préservés — n'écrase jamais une valeur déjà renseignée.
+- `render.py` : annotation visuelle OpenCV (squelette + crochets de cotation) sur la photo/frame au
+  PMB, pour vérifier les estimations avant `--write`.
+- **Lacune connue** : pas de tests dédiés (`tests/` ne couvre pas `measure/`) — précision non
+  validée par des tests automatisés, seulement par la procédure manuelle au ruban.
 
 ---
 
@@ -114,8 +143,8 @@ Logiciel d'analyse vidéo pour le réglage d'un vélo de contre-la-montre, basé
 | Stockage | Parquet (landmarks) + SQLite (sessions) | Simple, local, sans serveur |
 | Rapport | Jinja2 → HTML, Plotly CDN | Export autonome, pas de dépendance serveur |
 | UI v2 | Streamlit (Phase 4, optionnel) | Rapide à prototyper |
-| Tests | pytest, données synthétiques (NumPy + OpenCV) | Non-régression géométrie + ArUco + recommandations |
-| CI | GitHub Actions — lint (ruff) + format + tests Python 3.11/3.12 | Feedback rapide |
+| Tests | pytest, données synthétiques (NumPy + OpenCV) | Non-régression géométrie + ArUco + recommandations + plan frontal + ingest MJPEG |
+| CI | GitHub Actions — lint (ruff) + format + tests Python 3.11/3.12 | Feedback rapide. `mypy` est configuré (`pyproject.toml`) mais **pas encore branché en CI** — à ajouter ou retirer de `dev` pour éviter une fausse promesse de vérification de types. |
 | Packaging | uv / pyproject.toml | Standard moderne |
 
 ---
@@ -138,17 +167,21 @@ bikefit/
 │       └── mensurations.yaml
 ├── docs/
 │   ├── plan-developpement.md     # ce fichier
+│   ├── procedure-mesures.md      # procédure de prise de mesures + validation ruban
 │   └── aruco_marker_100mm.png    # marqueur à imprimer (DICT_4X4_50 ID=0)
+├── firmware/
+│   ├── README.md                 # installation/flash ESP32-CAM
+│   └── esp32cam_mjpeg/           # sketch Arduino, serveur MJPEG HTTP (vue de face)
 ├── models/                       # modèles MediaPipe .task (gitignorés)
 ├── cache/landmarks/              # Parquet par vidéo (gitignorés)
 ├── scripts/
 │   └── spike_bikefit.py          # Phase 0
 └── src/bikefit/
     ├── _paths.py                 # PROJECT_ROOT, MODELS_DIR, CACHE_DIR, CONFIG_DIR
-    ├── cli.py                    # Typer — analyze / history / compare
+    ├── cli.py                    # Typer — analyze (--front) / history / compare / measure-body / measure-setup
     ├── __main__.py               # injection du sous-commande par défaut
     ├── ingest/
-    │   └── reader.py             # VideoReader, TimedFrame
+    │   └── reader.py             # VideoReader (fichier ou flux MJPEG réseau), TimedFrame
     ├── pose/
     │   ├── base.py               # Landmark, FrameLandmarks, PoseEstimator (Protocol)
     │   ├── mediapipe_estimator.py
@@ -161,6 +194,7 @@ bikefit/
     │   ├── filter.py             # filter_landmarks (Savitzky-Golay)
     │   ├── cycles.py             # detect_cycles (find_peaks ankle_y)
     │   ├── angles.py             # compute_angles (vectorisé)
+    │   ├── frontal.py            # compute_frontal_metrics, aggregate_frontal_cycles (Phase 3C)
     │   ├── aggregate.py          # aggregate_cycles → FitMetrics
     │   └── metrics.py            # AngleStats, FitMetrics (Pydantic)
     ├── equipment/
@@ -172,9 +206,14 @@ bikefit/
     ├── report/
     │   ├── html.py               # render_html(...)
     │   └── template.html.jinja2
-    └── storage/
-        ├── models.py             # Session (Pydantic)
-        └── store.py              # SessionStore (sqlite3)
+    ├── storage/
+    │   ├── models.py             # Session (Pydantic)
+    │   └── store.py              # SessionStore (sqlite3)
+    └── measure/
+        ├── body.py               # estimate_body_measurements (photo → mensurations)
+        ├── setup.py              # estimate_bike_setup (vidéo + ArUco → setup vélo)
+        ├── render.py             # annotation visuelle OpenCV (vérification avant --write)
+        └── yaml_io.py            # update_null_fields (écrit uniquement les champs null)
 ```
 
 ---
@@ -213,20 +252,31 @@ bikefit/
 - CLI `--save-session`, `history`, `compare <id1> <id2>`.
 - 11 tests unitaires (données synthétiques, sans vidéo).
 
+### `measure/` — Bootstrap mensurations & setup vélo ✅ *(hors plan initial, cf. 2.10)*
+- `measure-body` (photo → mensurations) et `measure-setup` (vidéo + ArUco → setup vélo, fit de
+  cercle sur trajectoire cheville → BB), avec photo/frame annotée pour vérification visuelle.
+- **Lacune** : pas de tests dédiés dans `tests/`.
+
 ### Phase 3A+ — Mesure automatique du vélo *(à faire)*
-- 2ᵉ marqueur ArUco (ID=1) positionné sur le BB.
+- 2ᵉ marqueur ArUco (ID=1) positionné sur le BB, pour affiner l'estimation du BB au-delà du fit de
+  cercle déjà livré par `measure-setup` (approche intermédiaire à un seul marqueur, ±20 mm).
 - Calcul automatique depuis la vidéo :
   - hauteur de selle (BB → marqueur selle / landmark hanche)
   - reach (BB → extrémité des extensions)
   - stack (BB → hauteur des pads)
-- Remplissage automatique de `BikeSetup` — plus besoin de mètre ruban.
+- Remplissage automatique de `BikeSetup` avec validation ± 5 mm — plus besoin de mètre ruban.
 - Calibration des coefficients de sensibilité à partir des sessions réelles (avant/après réglage connu).
 - **Prérequis** : imprimer et coller les marqueurs ArUco ID=0 (calibration) et ID=1 (BB).
 
-### Phase 3C — Vue de face *(à faire)*
-- Flux MJPEG HTTP (ESP32-CAM) dans `VideoReader`.
-- Angles dans le plan frontal : alignement des genoux, largeur coudes.
-- Nouvelles métriques dans `FitMetrics`.
+### Phase 3C — Vue de face ✅
+- Flux MJPEG HTTP (ESP32-CAM) dans `VideoReader` (parsing manuel SOI/EOI), firmware Arduino
+  (`firmware/esp32cam_mjpeg/`) documenté dans `firmware/README.md`.
+- Angles dans le plan frontal : déviation genoux, largeur coudes (`kinematics/frontal.py`).
+- Nouvelles métriques optionnelles dans `FitMetrics` (`genou_deviation_gauche/droit`, `largeur_coudes`).
+- CLI : `analyze --front <vidéo|url> [--front-duration N]`. Schéma vélo vue de face dans le rapport HTML.
+- 16 tests unitaires (`test_frontal.py`, `test_aggregate_frontal.py`, `test_ingest.py`, données
+  synthétiques). Testé manuellement en direct (vidéo + flux ESP32-CAM réel), mais **pas de jalon de
+  précision chiffré pour l'instant** — contrairement au ±2° de la Phase 1.
 
 ### Phase 4 — UI web *(optionnel)*
 - Streamlit : upload vidéo, squelette superposé, rapport interactif, historique sessions.
