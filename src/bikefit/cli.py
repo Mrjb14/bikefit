@@ -149,6 +149,7 @@ def analyze(
     ] = None,
 ) -> None:
     """Analyse une vidéo et produit les métriques de fitting + recommandations."""
+    from bikefit._paths import REPORTS_DIR
     from bikefit.equipment import load_bike_profile, load_rider_profile
     from bikefit.ingest import VideoReader
     from bikefit.ingest.reader import _is_stream_url, _is_webcam_source, _same_source
@@ -404,13 +405,15 @@ def analyze(
         typer.echo("\n" + json_str)
 
     # ── Rapport HTML ─────────────────────────────────────────────────────────
+    # Par défaut dans REPORTS_DIR, jamais à côté de la vidéo source : une analyse
+    # ne doit pas polluer le dossier des entrées (cf. data/sources vs data/outputs).
     if report:
         report_path = report
-    elif video_is_live:
-        # Une source live n'a pas de chemin dont dériver un nom → horodatage
-        report_path = Path(f"bikefit_{datetime.now():%Y%m%d_%H%M%S}.html")
     else:
-        report_path = video_path.with_suffix(".html")
+        stamp = f"{datetime.now():%Y%m%d_%H%M%S}"
+        stem = "live" if video_is_live else video_path.stem
+        report_path = REPORTS_DIR / f"{stem}_{stamp}.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
     render_html(
         metrics,
         fit_report,
@@ -537,7 +540,7 @@ def measure_body(
     write: Annotated[bool, typer.Option(help="Met à jour les champs null dans le YAML")] = False,
 ) -> None:
     """Estime les mensurations corporelles depuis une photo debout (MediaPipe)."""
-    from bikefit._paths import CONFIG_DIR
+    from bikefit._paths import ANNOTATED_DIR, CONFIG_DIR
     from bikefit.equipment import load_rider_profile
     from bikefit.measure.body import estimate_body_measurements
     from bikefit.measure.yaml_io import update_null_fields
@@ -563,7 +566,8 @@ def measure_body(
     # ── Annotation visuelle ───────────────────────────────────────────────────
     from bikefit.measure.render import annotate_body_photo
 
-    annotated = photo.with_name(photo.stem + "_annotated.jpg")
+    ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
+    annotated = ANNOTATED_DIR / f"{photo.stem}_annotated.jpg"
     try:
         annotate_body_photo(photo, estimates, annotated)
         typer.echo(f"Photo annotée     -> {annotated}")
@@ -599,7 +603,7 @@ def measure_setup(
     no_cache: Annotated[bool, typer.Option(help="Force le recalcul des landmarks")] = False,
 ) -> None:
     """Estime setup_actuel (hauteur selle, guidon, reach) depuis la vidéo + ArUco."""
-    from bikefit._paths import CONFIG_DIR
+    from bikefit._paths import ANNOTATED_DIR, CONFIG_DIR
     from bikefit.calibration import calibrate_from_video
     from bikefit.ingest import VideoReader
     from bikefit.measure.setup import estimate_bike_setup
@@ -658,7 +662,8 @@ def measure_setup(
     # ── Annotation visuelle (avant de popper les clés de debug) ──────────────
     from bikefit.measure.render import annotate_setup_frame
 
-    annotated = video.with_name(video.stem + "_annotated.jpg")
+    ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
+    annotated = ANNOTATED_DIR / f"{video.stem}_annotated.jpg"
     try:
         annotate_setup_frame(
             str(video),
