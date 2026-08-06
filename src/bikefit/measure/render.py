@@ -9,25 +9,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-# Connexions squelette MediaPipe à tracer
-_SKELETON = [
-    (11, 12),
-    (11, 23),
-    (12, 24),
-    (23, 24),  # torse
-    (11, 13),
-    (13, 15),  # bras gauche
-    (12, 14),
-    (14, 16),  # bras droit
-    (23, 25),
-    (25, 27),
-    (27, 29),
-    (27, 31),  # jambe gauche
-    (24, 26),
-    (26, 28),
-    (28, 30),
-    (28, 32),  # jambe droite
-]
+from bikefit.kinematics.landmarks import SKELETON_EDGES
 
 # BGR — choisi pour être lisibles sur fond sombre ET clair
 _BONE = (160, 160, 160)
@@ -66,7 +48,7 @@ def _avg(lm: list[_LM], i: int, j: int, w: int, h: int) -> tuple[int, int]:
 
 
 def _draw_skeleton(img: np.ndarray, lm: list[_LM], w: int, h: int) -> None:
-    for a, b in _SKELETON:
+    for a, b in SKELETON_EDGES:
         cv2.line(img, _px(lm, a, w, h), _px(lm, b, w, h), _BONE, 2, cv2.LINE_AA)
     for i in range(33):
         cv2.circle(img, _px(lm, i, w, h), 5, _DOT, -1, cv2.LINE_AA)

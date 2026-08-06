@@ -56,6 +56,6 @@ jobs:
         run: uv sync --extra dev
 
       - name: Pytest + couverture
-        # Seuil = niveau actuel (59 %) moins une marge : empêche la régression
+        # Seuil = niveau actuel (71 %) moins une marge : empêche la régression
         # sans bloquer sur une variation mineure entre plateformes.
-        run: uv run pytest --cov=src/bikefit --cov-report=term-missing --cov-fail-under=55
+        run: uv run pytest --cov=src/bikefit --cov-report=term-missing --cov-fail-under=65
