@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 
-def update_null_fields(path: Path, updates: dict[str, int | float]) -> list[str]:
+def update_null_fields(path: Path, updates: Mapping[str, float]) -> list[str]:
     """Remplace les valeurs `null` par les estimations, commentaires conservés.
 
     Seuls les champs valant exactement `null` sont remplacés.
@@ -15,9 +16,13 @@ def update_null_fields(path: Path, updates: dict[str, int | float]) -> list[str]
     text = path.read_text(encoding="utf-8")
     updated: list[str] = []
     for key, value in updates.items():
+
+        def _replace(m: re.Match[str], v: float = value) -> str:
+            return f"{m.group(1)}{v}{m.group(2) or ''}"
+
         new_text, n = re.subn(
             rf"^(\s*{re.escape(key)}\s*:\s*)null(\s*#.*)?$",
-            lambda m, v=value: f"{m.group(1)}{v}{m.group(2) or ''}",
+            _replace,
             text,
             flags=re.MULTILINE,
         )

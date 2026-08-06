@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from bikefit.kinematics.landmarks import BODY
+from bikefit.kinematics.landmarks import BODY, Side
 
 
 def _px(df: pd.DataFrame, lm_idx: int, width: int, height: int) -> np.ndarray:
@@ -45,7 +45,11 @@ def compute_frontal_metrics(df: pd.DataFrame, width: int, height: int) -> pd.Dat
         "timestamp_ms": df["timestamp_ms"].to_numpy(),
     }
 
-    for side, key in (("left", "genou_deviation_gauche"), ("right", "genou_deviation_droit")):
+    sides: tuple[tuple[Side, str], ...] = (
+        ("left", "genou_deviation_gauche"),
+        ("right", "genou_deviation_droit"),
+    )
+    for side, key in sides:
         hip = _px(df, BODY[side]["hip"], width, height)
         knee = _px(df, BODY[side]["knee"], width, height)
         ankle = _px(df, BODY[side]["ankle"], width, height)

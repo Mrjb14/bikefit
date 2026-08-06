@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
+
+if TYPE_CHECKING:
+    from bikefit.kinematics.landmarks import Side
 
 app = typer.Typer(help="Analyse vidéo de position cycliste (CLM)")
 
@@ -77,6 +80,7 @@ def analyze(
     if side not in ("right", "left"):
         typer.echo("Erreur : --side doit être 'right' ou 'left'", err=True)
         raise typer.Exit(1)
+    filmed_side: Side = "right" if side == "right" else "left"
 
     # ── Ingest ───────────────────────────────────────────────────────────────
     reader = VideoReader(video)
@@ -104,8 +108,8 @@ def analyze(
 
     # ── Kinematics ───────────────────────────────────────────────────────────
     df_filtered = filter_landmarks(df, reader.fps)
-    angle_df = compute_angles(df_filtered, side, reader.width, reader.height)  # type: ignore[arg-type]
-    cycles = detect_cycles(df_filtered, side, reader.fps)  # type: ignore[arg-type]
+    angle_df = compute_angles(df_filtered, filmed_side, reader.width, reader.height)
+    cycles = detect_cycles(df_filtered, filmed_side, reader.fps)
     typer.echo(f"Cycles détectés : {len(cycles)}")
 
     if len(cycles) < 3:
@@ -214,17 +218,17 @@ def analyze(
         typer.echo("\n" + json_str)
 
     # ── Rapport HTML ─────────────────────────────────────────────────────────
-    _report_kwargs = {
-        "rider": rider_profile,
-        "bike": bike_profile,
-    }
-    if report:
-        render_html(metrics, fit_report, angle_df, video, report, **_report_kwargs)
-        typer.echo(f"Rapport HTML -> {report}")
-    else:
-        default_report = video.with_suffix(".html")
-        render_html(metrics, fit_report, angle_df, video, default_report, **_report_kwargs)
-        typer.echo(f"Rapport HTML -> {default_report}")
+    report_path = report if report else video.with_suffix(".html")
+    render_html(
+        metrics,
+        fit_report,
+        angle_df,
+        video,
+        report_path,
+        rider=rider_profile,
+        bike=bike_profile,
+    )
+    typer.echo(f"Rapport HTML -> {report_path}")
 
     # ── Session SQLite ────────────────────────────────────────────────────────
     if save_session:
@@ -417,6 +421,7 @@ def measure_setup(
     if side not in ("right", "left"):
         typer.echo("Erreur : --side doit être 'right' ou 'left'", err=True)
         raise typer.Exit(1)
+    filmed_side: Side = "right" if side == "right" else "left"
 
     # ── Pose (avec cache) ─────────────────────────────────────────────────────
     reader = VideoReader(video)
@@ -455,7 +460,7 @@ def measure_setup(
         mm_per_pixel=calib.mm_per_pixel,
         image_width=reader.width,
         image_height=reader.height,
-        side=side,  # type: ignore[arg-type]
+        side=filmed_side,
     )
 
     # ── Annotation visuelle (avant de popper les clés de debug) ──────────────
@@ -470,7 +475,7 @@ def measure_setup(
             calib.mm_per_pixel,
             reader.width,
             reader.height,
-            side,
+            filmed_side,
             annotated,
         )
         typer.echo(f"Frame annotée     -> {annotated}")

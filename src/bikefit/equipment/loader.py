@@ -22,9 +22,13 @@ def load_bike_profile(name: str) -> BikeProfile:
     with contextlib.suppress(KeyError, TypeError):
         manivelle = float(data["transmission"]["pedalier"]["longueur_manivelles"])
 
-    return BikeProfile(
-        modele=data["modele"],
-        longueur_manivelle_mm=manivelle,
-        setup_actuel=data.get("setup_actuel") or {},
-        plages_reglage=data.get("plages_reglage") or {},
+    # model_validate (et non le constructeur) : les sous-structures arrivent en dict
+    # brut depuis le YAML, c'est Pydantic qui les valide en BikeSetup/PlagesReglage.
+    return BikeProfile.model_validate(
+        {
+            "modele": data["modele"],
+            "longueur_manivelle_mm": manivelle,
+            "setup_actuel": data.get("setup_actuel") or {},
+            "plages_reglage": data.get("plages_reglage") or {},
+        }
     )

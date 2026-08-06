@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Protocol
+from types import TracebackType
+from typing import Protocol, Self
 
 import numpy as np
 from pydantic import BaseModel
@@ -24,8 +25,13 @@ class FrameLandmarks(BaseModel):
 
 
 class PoseEstimator(Protocol):
-    def __enter__(self) -> PoseEstimator: ...
-    def __exit__(self, *args: object) -> None: ...
+    def __enter__(self) -> Self: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
     def process(
         self, frame_bgr: np.ndarray, timestamp_ms: int, frame_idx: int
     ) -> FrameLandmarks: ...

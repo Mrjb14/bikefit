@@ -71,9 +71,12 @@ def load_rider_profile(name: str = "mensurations") -> RiderProfile | None:
         return None
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     with contextlib.suppress(Exception):
-        return RiderProfile(
-            mensurations=data.get("mensurations") or {},
-            profil=data.get("profil") or {},
-            objectif=data.get("objectif") or {},
+        # model_validate : les sous-structures arrivent en dict brut depuis le YAML.
+        return RiderProfile.model_validate(
+            {
+                "mensurations": data.get("mensurations") or {},
+                "profil": data.get("profil") or {},
+                "objectif": data.get("objectif") or {},
+            }
         )
     return None
