@@ -2,10 +2,63 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol
 
 # Proportion nez→cheville / stature (anthropométrie moyenne adulte)
 _NOSE_ANKLE_RATIO = 0.935
+
+
+class _HasXY(Protocol):
+    """Un world_landmark MediaPipe (seuls x et y nous intéressent ici)."""
+
+    x: float
+    y: float
+
+
+def measurements_from_world_landmarks(
+    wl: Sequence[_HasXY],
+    taille_mm: int | None = None,
+) -> dict[str, int]:
+    """Géométrie pure : world_landmarks (mètres) → mensurations en mm.
+
+    Séparée de l'appel MediaPipe pour être testable sans modèle ni photo.
+
+    Convention y=bas, comme partout ailleurs dans le projet (cf. CLAUDE.md) :
+    une cheville est PLUS BAS qu'une hanche, donc ankle_y > hip_y.
+    """
+
+    def _y(i: int) -> float:
+        return wl[i].y
+
+    def _x(i: int) -> float:
+        return wl[i].x
+
+    # Moyennes gauche/droite pour robustesse
+    hip_y = (_y(23) + _y(24)) / 2  # ≈ 0.0 (origine)
+    knee_y = (_y(25) + _y(26)) / 2
+    ankle_y = (_y(27) + _y(28)) / 2
+    shoulder_y = (_y(11) + _y(12)) / 2
+    nose_y = _y(0)
+
+    raw_m: dict[str, float] = {
+        "entrejambe": ankle_y - hip_y,  # hanche → cheville
+        "longueur_femur": knee_y - hip_y,  # hanche → genou
+        "longueur_tibia": ankle_y - knee_y,  # genou → cheville
+        "longueur_buste": hip_y - shoulder_y,  # hanche → épaule (proxy buste)
+        "largeur_epaules": abs(_x(11) - _x(12)),
+        "largeur_hanches": abs(_x(23) - _x(24)),
+    }
+
+    # Facteur d'échelle si taille connue
+    scale = 1.0
+    if taille_mm is not None:
+        nose_ankle_m = ankle_y - nose_y
+        if nose_ankle_m > 0.1:
+            scale = (taille_mm / 1000 * _NOSE_ANKLE_RATIO) / nose_ankle_m
+
+    return {k: round(v * scale * 1000) for k, v in raw_m.items()}
 
 
 def estimate_body_measurements(
@@ -41,36 +94,4 @@ def estimate_body_measurements(
     if not result.pose_world_landmarks:
         raise RuntimeError("Aucune personne détectée dans la photo.")
 
-    wl = result.pose_world_landmarks[0]
-
-    def _y(i: int) -> float:
-        # y=bas dans les world_landmarks MediaPipe (même convention que les frames image)
-        return wl[i].y
-
-    def _x(i: int) -> float:
-        return wl[i].x
-
-    # Moyennes gauche/droite pour robustesse
-    hip_y = (_y(23) + _y(24)) / 2  # ≈ 0.0 (origine)
-    knee_y = (_y(25) + _y(26)) / 2
-    ankle_y = (_y(27) + _y(28)) / 2
-    shoulder_y = (_y(11) + _y(12)) / 2
-    nose_y = _y(0)
-
-    raw_m: dict[str, float] = {
-        "entrejambe": ankle_y - hip_y,  # hanche → cheville
-        "longueur_femur": knee_y - hip_y,  # hanche → genou
-        "longueur_tibia": ankle_y - knee_y,  # genou → cheville
-        "longueur_buste": hip_y - shoulder_y,  # hanche → épaule (proxy buste)
-        "largeur_epaules": abs(_x(11) - _x(12)),
-        "largeur_hanches": abs(_x(23) - _x(24)),
-    }
-
-    # Facteur d'échelle si taille connue
-    scale = 1.0
-    if taille_mm is not None:
-        nose_ankle_m = ankle_y - nose_y
-        if nose_ankle_m > 0.1:
-            scale = (taille_mm / 1000 * _NOSE_ANKLE_RATIO) / nose_ankle_m
-
-    return {k: round(v * scale * 1000) for k, v in raw_m.items()}
+    return measurements_from_world_landmarks(result.pose_world_landmarks[0], taille_mm)
