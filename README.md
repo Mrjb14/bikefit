@@ -73,6 +73,10 @@ VIDEO : fichier (mp4/mov), flux MJPEG (http://... ou rtsp://...) ou webcam local
 Options:
   --side TEXT          right | left — côté filmé (défaut: right)
   --duration FLOAT     Durée de capture (s) si VIDEO est un flux réseau ou une webcam (défaut: 15)
+  --start FLOAT        Ignore les N premières secondes (fichier) — montée sur le vélo
+  --end FLOAT          Ignore au-delà de N secondes (fichier) — descente du vélo
+  --front-start FLOAT  Idem --start, pour la vidéo de face
+  --front-end FLOAT    Idem --end, pour la vidéo de face
   --bike TEXT          Fiche vélo dans config/bikes/ (défaut: giant_trinity_2019)
   --profile TEXT       triathlon_XL | clm_long | clm_court (défaut: triathlon_XL)
   --report PATH        Rapport HTML de sortie
@@ -90,6 +94,28 @@ Options:
 
 `VIDEO` et `--front` ne peuvent pas pointer vers la même source (même fichier, même flux, même
 index webcam) — la commande refuse de lancer les deux vues sur la même caméra.
+
+Sans `--report`, le rapport est écrit dans `data/outputs/reports/<video>_<horodatage>.html` :
+une analyse n'écrit jamais à côté de la vidéo source, et deux analyses de la même vidéo ne
+s'écrasent pas.
+
+### Découper la vidéo (`--start` / `--end`)
+
+Une vidéo filmée seul contient toujours la montée et la descente du vélo. Ces phases hors
+pédalage faussent lourdement les moyennes — mesuré sur une capture de 79 s :
+
+| | Vidéo entière | Segment 20–70 s |
+|---|---|---|
+| Coude | 123,8° ± 25,1 | 108,1° ± 0,9 |
+| Tronc | 24,9° ± 14,8 | 16,3° ± 0,5 |
+| Reco prolongateurs | −111 mm | **−48 mm** |
+
+```bash
+python -m bikefit data/sources/video.mp4 --side right --start 20 --end 70
+```
+
+Le découpage s'applique **après** le cache de landmarks : ajuster les bornes se rejoue
+instantanément, la vidéo n'est jamais réanalysée.
 
 ### `history` — liste les sessions
 
@@ -231,14 +257,15 @@ bikefit/
 ├── firmware/
 │   ├── README.md                # installation/flash ESP32-CAM
 │   └── esp32cam_mjpeg/          # sketch Arduino, serveur MJPEG HTTP (vue de face)
-├── models/                      # modèles MediaPipe .task (gitignorés)
-├── cache/landmarks/             # cache Parquet par vidéo (gitignorés)
+├── data/                        # données locales, entièrement gitignoré
+│   ├── sources/                 # vidéos et photos d'entrée (seuls fichiers non regénérables)
+│   └── outputs/                 # reports/ · metrics/ · debug/ · annotated/ — tout le généré
 ├── scripts/
 │   └── spike_bikefit.py         # script autonome Phase 0
 └── src/bikefit/
     ├── ingest/                  # VideoReader (fichier, flux MJPEG réseau ou webcam), TimedFrame
     ├── pose/                    # PoseEstimator (Protocol) + MediaPipe + LandmarkCache
-    ├── kinematics/              # filter, cycles, angles, aggregate, frontal (Phase 3C), FitMetrics
+    ├── kinematics/              # filter, cycles, angles, aggregate, frontal, visibility, FitMetrics
     ├── calibration/             # ArUco — detect_marker_size_px, calibrate_from_video
     ├── equipment/               # BikeProfile, BikeSetup, loader YAML
     ├── recommend/               # moteur de règles → FitReport + Recommendation
@@ -249,14 +276,22 @@ bikefit/
     └── cli.py                   # Typer — analyze (--front, --debug-video) / history / compare / measure-*
 ```
 
+Les données runtime vivent **hors du dépôt**, dans `~/.bikefit/` : `models/` (modèle MediaPipe
+téléchargé au premier lancement), `cache/landmarks/` (Parquet par vidéo) et `sessions.db`.
+
 ## Tests
 
 ```bash
-python -m pytest        # 115 tests — angles, ArUco, recommandations, storage, plan frontal,
-                         # ingest MJPEG/webcam, report HTML, CLI, vidéo de debug (données synthétiques)
+python -m pytest        # 198 tests — angles, filtre SG, cycles, visibilité/fiabilité, ArUco,
+                         # recommandations, storage, plan frontal, ingest MJPEG/webcam, measure/,
+                         # report HTML, CLI, vidéo de debug (données synthétiques)
+uv run mypy src
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
 ```
+
+CI : matrice `ubuntu` (Python 3.11, 3.12) **et `windows`** — plateforme de dev principale, seule à
+révéler les bugs d'encodage console et de séparateurs de chemin. Couverture minimale : 65 %.
 
 ## Documentation
 
@@ -271,9 +306,28 @@ uv run ruff format --check src tests scripts
 - [x] Phase 2 — moteur de règles, fiche vélo, rapport HTML (coefficients empiriques)
 - [x] Phase 3A — calibration ArUco : `mm_per_pixel` détecté, stocké en session *(marqueur non encore imprimé)*
 - [x] Phase 3B — sessions SQLite : `history`, `compare`, `--save-session`
-- [x] `measure/` — bootstrap `measure-body`/`measure-setup` (mensurations + setup vélo, photo/vidéo annotée) *(pas de tests dédiés)*
+- [x] `measure/` — bootstrap `measure-body`/`measure-setup` (mensurations + setup vélo, photo/vidéo annotée)
 - [ ] Phase 3A+ — mesure automatique du vélo (BB → selle, reach, stack) via 2ᵉ marqueur ArUco
 - [x] Phase 3C — vue de face (`--front`, fichier ou flux MJPEG ESP32-CAM) : déviation genoux, largeur coudes, firmware ESP32-CAM
 - [x] Vue de profil en flux réseau/webcam (symétrique à `--front`) + garde anti-double-source
 - [x] Vidéo de debug (`--debug-video`/`--front-debug-video`) : squelette + angles superposés, toute source
+- [x] Découpage `--start`/`--end` — exclut la montée/descente du vélo, appliqué après le cache
+- [x] Fiabilité des mesures — les landmarks *inférés* par MediaPipe sont exclus des angles, et chaque
+      métrique porte sa visibilité + son taux de frames exploitées (voir ci-dessous)
+- [ ] Filtre de plausibilité sur la durée des cycles — un faux PMB fait encore passer l'écart-type
+      du genou de 2,2° à 9,8°
 - [ ] Phase 4 — UI Streamlit (optionnel)
+
+## Fiabilité des mesures
+
+MediaPipe *infère* les landmarks masqués : sur une vue de profil, le côté opposé à la caméra
+descend typiquement à 0,2–0,3 de `visibility`. Le squelette reste plausible, mais les coordonnées
+sont devinées.
+
+Un angle dont l'un des sommets passe sous le seuil (0,5) est donc **exclu** plutôt que calculé sur
+des positions inventées, et chaque métrique porte sa `visibility` et son `frames_kept` — affichés
+dans le rapport HTML et en avertissement CLI dès qu'une mesure devient douteuse.
+
+Mesuré sur une capture réelle : vue de profil inchangée (côté filmé à 0,94–1,00), mais 60 des
+63 cycles de la **vue de face** reposaient sur des genoux inférés (genou gauche à 0,32) — la
+déviation du genou droit passait de +2,6° à −0,3°, soit un changement de signe.
