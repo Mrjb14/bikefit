@@ -1,0 +1,155 @@
+"""Tests du CLI (Typer) — commandes qui ne nécessitent pas le pipeline vidéo/pose.
+
+`analyze`/`measure-body`/`measure-setup` dépendent de MediaPipe + une vidéo réelle et ne
+sont pas couverts ici au-delà de leur validation d'arguments précoce (avant tout traitement
+lourd). `history` et `compare` sont testés de bout en bout (vrai SQLite, sans mock).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from bikefit.cli import app
+from bikefit.equipment.models import BikeModel, BikeProfile, BikeSetup
+from bikefit.kinematics.metrics import AngleStats, FitMetrics
+from bikefit.recommend import recommend
+from bikefit.storage import Session, SessionStore
+
+runner = CliRunner()
+
+# ── Helpers (mêmes que test_storage.py) ────────────────────────────────────────
+
+
+def _stats(mean: float) -> AngleStats:
+    return AngleStats(mean=mean, std=1.0, min=mean - 5, max=mean + 5, n_cycles=10)
+
+
+def _metrics(genou: float = 150.0) -> FitMetrics:
+    return FitMetrics(
+        genou_extension_pmb=_stats(genou),
+        genou_flexion_pmh=_stats(71.0),
+        hanche_fermee_pmh=_stats(55.0),
+        tronc=_stats(16.0),
+        coude=_stats(96.0),
+        cheville_pmb=_stats(138.0),
+        n_cycles_total=10,
+        n_cycles_used=10,
+        detection_rate=1.0,
+    )
+
+
+def _bike() -> BikeProfile:
+    return BikeProfile(modele=BikeModel(marque="Giant", nom="Trinity", annee=2019, taille="M"))
+
+
+def _session(genou: float = 150.0, video: str = "test.mp4") -> Session:
+    metrics = _metrics(genou)
+    report = recommend(metrics, _bike(), profile="triathlon_XL")
+    return Session(
+        date=datetime(2026, 8, 5, 10, 0, 0),
+        video_path=video,
+        bike_name="giant_trinity_2019",
+        profile="triathlon_XL",
+        setup=BikeSetup(),
+        metrics=metrics,
+        report=report,
+    )
+
+
+# ── analyze : validation précoce (avant pipeline pose) ─────────────────────────
+
+
+class TestAnalyzeValidation:
+    def test_missing_video_exits_1(self, tmp_path: Path) -> None:
+        # CliRunner appelle l'app Typer directement (pas __main__.py) — le sous-commande
+        # "analyze" doit être explicite, contrairement à `python -m bikefit video.mp4`.
+        result = runner.invoke(app, ["analyze", str(tmp_path / "introuvable.mp4")])
+        assert result.exit_code == 1
+        assert "introuvable" in result.output.lower()
+
+    def test_invalid_side_exits_1(self, tmp_path: Path) -> None:
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"\x00")  # existe, contenu bidon — --side rejeté avant lecture
+        result = runner.invoke(app, ["analyze", str(video), "--side", "gauche"])
+        assert result.exit_code == 1
+        assert "--side" in result.output
+
+
+# ── history ──────────────────────────────────────────────────────────────────
+
+
+class TestHistory:
+    def test_no_db_file(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        result = runner.invoke(app, ["history", "--db", str(db)])
+        assert result.exit_code == 0
+        assert "Aucune session" in result.output
+
+    def test_empty_db(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        SessionStore(db)  # crée le fichier + le schéma, sans session
+        result = runner.invoke(app, ["history", "--db", str(db)])
+        assert "Aucune session" in result.output
+
+    def test_lists_saved_sessions(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        store = SessionStore(db)
+        store.save(_session(genou=150.0, video="a.mp4"))
+        store.save(_session(genou=148.0, video="b.mp4"))
+        result = runner.invoke(app, ["history", "--db", str(db)])
+        assert result.exit_code == 0
+        assert "giant_trinity_2019" in result.output
+        assert result.output.count("triathlon_XL") == 2
+
+    def test_limit_option(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        store = SessionStore(db)
+        for i in range(5):
+            store.save(_session(video=f"v{i}.mp4"))
+        result = runner.invoke(app, ["history", "--db", str(db), "--limit", "2"])
+        lines = result.output.splitlines()
+        session_lines = [line for line in lines if "giant_trinity_2019" in line]
+        assert len(session_lines) == 2
+
+
+# ── compare ──────────────────────────────────────────────────────────────────
+
+
+class TestCompare:
+    def test_missing_db_exits_1(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        result = runner.invoke(app, ["compare", "1", "2", "--db", str(db)])
+        assert result.exit_code == 1
+        assert "Aucune session" in result.output
+
+    def test_unknown_session_id_exits_1(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        store = SessionStore(db)
+        store.save(_session())
+        result = runner.invoke(app, ["compare", "1", "999", "--db", str(db)])
+        assert result.exit_code == 1
+        assert "#999" in result.output
+        assert "introuvable" in result.output.lower()
+
+    def test_compare_two_sessions_shows_delta(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        store = SessionStore(db)
+        store.save(_session(genou=150.0, video="avant.mp4"))
+        store.save(_session(genou=145.0, video="apres.mp4"))
+        result = runner.invoke(app, ["compare", "1", "2", "--db", str(db)])
+        assert result.exit_code == 0
+        assert "#1" in result.output
+        assert "#2" in result.output
+        assert "-5.0" in result.output  # delta genou : 145 - 150
+
+    def test_compare_no_recommendations_message(self, tmp_path: Path) -> None:
+        db = tmp_path / "sessions.db"
+        store = SessionStore(db)
+        # genou=145 -> dans la cible triathlon_XL (140-150), pas de recommandation
+        store.save(_session(genou=145.0))
+        store.save(_session(genou=145.0, video="autre.mp4"))
+        result = runner.invoke(app, ["compare", "1", "2", "--db", str(db)])
+        assert "position optimale" in result.output.lower()
