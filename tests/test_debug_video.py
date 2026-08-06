@@ -334,3 +334,49 @@ def test_row_to_points_and_hud_are_pure(width: int, height: int) -> None:
     row_copy = row.copy()
     _row_to_points(row, width, height)
     pd.testing.assert_series_equal(row, row_copy)
+
+
+class TestSkeletonDimming:
+    """Le squelette doit distinguer ce qui est observé de ce qui est inféré.
+
+    Sans distinction, le côté opposé à la caméra (visibilité ~0.3) s'affiche aussi
+    nettement que le côté filmé, et la vidéo de debug laisse croire à une pose
+    entièrement mesurée.
+    """
+
+    @staticmethod
+    def _draw(visibility: list[float] | None) -> np.ndarray:
+        from bikefit.debug.video import _draw_skeleton
+
+        img = np.zeros((200, 200, 3), dtype=np.uint8)
+        points: list[tuple[int, int] | None] = [(100, 100) for _ in range(33)]
+        points[11], points[13] = (40, 60), (40, 140)  # segment gauche isolé
+        _draw_skeleton(img, points, visibility)
+        return img
+
+    def test_all_visible_uses_bright_bone(self) -> None:
+        from bikefit.debug.video import _BONE
+
+        img = self._draw([1.0] * 33)
+        assert (img == np.array(_BONE, dtype=np.uint8)).all(axis=2).any()
+
+    def test_inferred_uses_dim_bone(self) -> None:
+        from bikefit.debug.video import _BONE, _BONE_WEAK
+
+        img = self._draw([0.2] * 33)
+        assert (img == np.array(_BONE_WEAK, dtype=np.uint8)).all(axis=2).any()
+        assert not (img == np.array(_BONE, dtype=np.uint8)).all(axis=2).any()
+
+    def test_none_keeps_previous_behaviour(self) -> None:
+        # Rétrocompatibilité : sans score fourni, tout est tracé comme fiable
+        from bikefit.debug.video import _BONE
+
+        img = self._draw(None)
+        assert (img == np.array(_BONE, dtype=np.uint8)).all(axis=2).any()
+
+    def test_row_to_visibility_defaults_to_one(self) -> None:
+        from bikefit.debug.video import _row_to_visibility
+
+        vis = _row_to_visibility(pd.Series({"frame_idx": 0}))
+        assert len(vis) == 33
+        assert all(v == 1.0 for v in vis)

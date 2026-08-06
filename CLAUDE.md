@@ -29,6 +29,11 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 ## Principes non négociables
 1. **Précision avant tout** : chaque mesure est moyennée sur N cycles de pédalage,
    jamais sur une frame unique. Toute métrique porte un écart-type / indice de confiance.
+   Concrètement (`kinematics/visibility.py`) : MediaPipe *infère* les points masqués
+   (côté opposé à la caméra ≈ 0.2-0.3 de `visibility`). Un angle dont un sommet passe
+   sous `VISIBILITY_THRESHOLD` (0.5) est mis à NaN plutôt que calculé sur des
+   coordonnées devinées, et `AngleStats` porte `visibility` + `frames_kept`
+   (→ `is_reliable`). Ne jamais publier une métrique sans sa fiabilité.
 2. **Cache des landmarks** : la pose estimation d'une vidéo n'est calculée qu'une
    fois, résultat en Parquet dans le cache. Tout le reste du pipeline doit pouvoir
    se rejouer depuis ce cache en < 1 s.
