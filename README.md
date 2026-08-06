@@ -39,6 +39,7 @@ vidéo ──► [ingest] ──► [pose MediaPipe + cache Parquet] ──► [
 | Recommend | `recommend/` | Règles explicites : angles hors cible → delta mm par réglage |
 | Report | `report/` | Rapport HTML interactif (Plotly), 5 graphes d'angles, schéma SVG |
 | Storage | `storage/` | Sessions SQLite : historique, comparaison avant/après |
+| Measure | `measure/` | Bootstrap des YAML personnels : mensurations (photo) et setup vélo (vidéo + ArUco) |
 
 ## Métriques calculées
 
@@ -92,6 +93,37 @@ python -m bikefit compare ID1 ID2 [--db PATH]
 
 Affiche un tableau des deltas d'angles et les recommandations restantes.
 
+### `measure-body` — bootstrap des mensurations depuis une photo
+
+```
+python -m bikefit measure-body PHOTO [OPTIONS]
+
+Options:
+  --rider TEXT   Fiche coureur dans config/rider/ (défaut: mensurations)
+  --write        Met à jour les champs null du YAML (n'écrase jamais un champ déjà renseigné)
+```
+
+Estime `entrejambe`, `longueur_femur`, `longueur_tibia`, `longueur_buste`, `largeur_epaules`,
+`largeur_hanches` depuis une photo debout (MediaPipe, world landmarks 3D), mis à l'échelle via
+`taille` si renseignée. Précision indicative ±5-10 % — à valider au mètre ruban
+(voir [`docs/procedure-mesures.md`](docs/procedure-mesures.md)).
+
+### `measure-setup` — bootstrap du setup vélo depuis une vidéo
+
+```
+python -m bikefit measure-setup VIDEO --marker-size FLOAT [OPTIONS]
+
+Options:
+  --side TEXT          right | left — côté filmé (défaut: right)
+  --bike TEXT           Fiche vélo dans config/bikes/ (défaut: giant_trinity_2019)
+  --write               Met à jour les champs null du YAML
+  --no-cache            Force le recalcul des landmarks MediaPipe
+```
+
+Calibre via ArUco puis estime le centre du boîtier de pédalier (fit de cercle sur la trajectoire
+de la cheville) pour en déduire `hauteur_selle_bb`, `hauteur_guidon_bb`, `reach_prolongateurs`.
+Précision indicative ±20 mm — validation au mètre ruban obligatoire avant usage.
+
 ## Calibration ArUco (optionnelle)
 
 Colle un marqueur ArUco `DICT_4X4_50 ID=0` sur le cadre (tube de selle ou diagonal,
@@ -132,7 +164,8 @@ bikefit/
     ├── recommend/               # moteur de règles → FitReport + Recommendation
     ├── report/                  # rapport HTML Jinja2 + Plotly (dark theme)
     ├── storage/                 # Session + SessionStore (SQLite)
-    └── cli.py                   # Typer — analyze / history / compare
+    ├── measure/                 # Bootstrap YAML : mensurations (photo) + setup vélo (vidéo/ArUco)
+    └── cli.py                   # Typer — analyze / history / compare / measure-body / measure-setup
 ```
 
 ## Tests
@@ -146,6 +179,7 @@ uv run ruff format --check src tests scripts
 ## Documentation
 
 - [Plan de développement & architecture](docs/plan-developpement.md)
+- [Procédure de prise de mesures](docs/procedure-mesures.md) — `measure-body` / `measure-setup` + validation au mètre ruban
 - [CLAUDE.md](CLAUDE.md) — contexte pour Claude Code
 
 ## Statut
