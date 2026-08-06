@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from bikefit.kinematics.landmarks import Side
 
 app = typer.Typer(help="Analyse vidéo de position cycliste (CLM)")
@@ -42,6 +44,46 @@ _FRONT_HUD_COLUMNS: list[tuple[str, str, str]] = [
 ]
 
 
+def _trim_landmarks(
+    df: pd.DataFrame,
+    fps: float,
+    start_s: float | None,
+    end_s: float | None,
+    label: str,
+) -> pd.DataFrame:
+    """Restreint les landmarks à l'intervalle [start_s, end_s] (secondes).
+
+    Appliqué APRÈS le cache : les landmarks de la vidéo entière restent calculés une
+    seule fois, changer les bornes se rejoue instantanément (principe de cache du
+    projet). `frame_idx` est conservé tel quel — c'est la clé de découpage utilisée
+    en aval par aggregate_cycles.
+    """
+    if start_s is None and end_s is None:
+        return df
+
+    lo = int((start_s or 0.0) * fps)
+    hi = int(end_s * fps) if end_s is not None else None
+
+    mask = df["frame_idx"] >= lo
+    if hi is not None:
+        mask &= df["frame_idx"] < hi
+    trimmed = df[mask]
+
+    if trimmed.empty:
+        typer.echo(
+            f"Erreur : l'intervalle demandé ne contient aucune frame ({label}).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    kept_s = len(trimmed) / fps if fps > 0 else 0.0
+    typer.echo(
+        f"  Découpage {label} : {len(trimmed)}/{len(df)} frames conservées"
+        f" (~{kept_s:.0f}s, de {lo / fps:.0f}s)"
+    )
+    return trimmed
+
+
 @app.command()
 def analyze(
     video: Annotated[
@@ -64,6 +106,22 @@ def analyze(
         float,
         typer.Option(help="Durée de capture (s) si --front est un flux réseau ou une webcam"),
     ] = 15.0,
+    start: Annotated[
+        float | None,
+        typer.Option(help="Ignore les N premières secondes de la vidéo de profil (fichier)"),
+    ] = None,
+    end: Annotated[
+        float | None,
+        typer.Option(help="Ignore la vidéo de profil au-delà de N secondes (fichier)"),
+    ] = None,
+    front_start: Annotated[
+        float | None,
+        typer.Option(help="Ignore les N premières secondes de la vidéo de face (fichier)"),
+    ] = None,
+    front_end: Annotated[
+        float | None,
+        typer.Option(help="Ignore la vidéo de face au-delà de N secondes (fichier)"),
+    ] = None,
     debug_video: Annotated[
         Path | None,
         typer.Option(help="Vidéo de debug (squelette + angles superposés) pour la vue de profil"),
@@ -91,6 +149,7 @@ def analyze(
     ] = None,
 ) -> None:
     """Analyse une vidéo et produit les métriques de fitting + recommandations."""
+    from bikefit._paths import REPORTS_DIR
     from bikefit.equipment import load_bike_profile, load_rider_profile
     from bikefit.ingest import VideoReader
     from bikefit.ingest.reader import _is_stream_url, _is_webcam_source, _same_source
@@ -171,6 +230,9 @@ def analyze(
                     typer.echo("Cache supprimé.")
 
             df = cache.get_or_compute(video_path, reader, estimator)
+
+    if not video_is_live:
+        df = _trim_landmarks(df, reader.fps, start, end, "profil")
 
     detection_rate = df["detected"].mean()
     typer.echo(f"Taux de détection : {detection_rate:.1%}")
@@ -264,6 +326,9 @@ def analyze(
                 front_cache = LandmarkCache(CACHE_DIR / "landmarks")
                 front_df = front_cache.get_or_compute(Path(front), front_reader, front_estimator)
 
+        if not front_reader.is_live:
+            front_df = _trim_landmarks(front_df, front_reader.fps, front_start, front_end, "face")
+
         front_detection_rate = front_df["detected"].mean()
         typer.echo(f"  Taux de détection : {front_detection_rate:.1%}")
 
@@ -340,13 +405,15 @@ def analyze(
         typer.echo("\n" + json_str)
 
     # ── Rapport HTML ─────────────────────────────────────────────────────────
+    # Par défaut dans REPORTS_DIR, jamais à côté de la vidéo source : une analyse
+    # ne doit pas polluer le dossier des entrées (cf. data/sources vs data/outputs).
     if report:
         report_path = report
-    elif video_is_live:
-        # Une source live n'a pas de chemin dont dériver un nom → horodatage
-        report_path = Path(f"bikefit_{datetime.now():%Y%m%d_%H%M%S}.html")
     else:
-        report_path = video_path.with_suffix(".html")
+        stamp = f"{datetime.now():%Y%m%d_%H%M%S}"
+        stem = "live" if video_is_live else video_path.stem
+        report_path = REPORTS_DIR / f"{stem}_{stamp}.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
     render_html(
         metrics,
         fit_report,
@@ -473,7 +540,7 @@ def measure_body(
     write: Annotated[bool, typer.Option(help="Met à jour les champs null dans le YAML")] = False,
 ) -> None:
     """Estime les mensurations corporelles depuis une photo debout (MediaPipe)."""
-    from bikefit._paths import CONFIG_DIR
+    from bikefit._paths import ANNOTATED_DIR, CONFIG_DIR
     from bikefit.equipment import load_rider_profile
     from bikefit.measure.body import estimate_body_measurements
     from bikefit.measure.yaml_io import update_null_fields
@@ -499,7 +566,8 @@ def measure_body(
     # ── Annotation visuelle ───────────────────────────────────────────────────
     from bikefit.measure.render import annotate_body_photo
 
-    annotated = photo.with_name(photo.stem + "_annotated.jpg")
+    ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
+    annotated = ANNOTATED_DIR / f"{photo.stem}_annotated.jpg"
     try:
         annotate_body_photo(photo, estimates, annotated)
         typer.echo(f"Photo annotée     -> {annotated}")
@@ -535,7 +603,7 @@ def measure_setup(
     no_cache: Annotated[bool, typer.Option(help="Force le recalcul des landmarks")] = False,
 ) -> None:
     """Estime setup_actuel (hauteur selle, guidon, reach) depuis la vidéo + ArUco."""
-    from bikefit._paths import CONFIG_DIR
+    from bikefit._paths import ANNOTATED_DIR, CONFIG_DIR
     from bikefit.calibration import calibrate_from_video
     from bikefit.ingest import VideoReader
     from bikefit.measure.setup import estimate_bike_setup
@@ -594,7 +662,8 @@ def measure_setup(
     # ── Annotation visuelle (avant de popper les clés de debug) ──────────────
     from bikefit.measure.render import annotate_setup_frame
 
-    annotated = video.with_name(video.stem + "_annotated.jpg")
+    ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
+    annotated = ANNOTATED_DIR / f"{video.stem}_annotated.jpg"
     try:
         annotate_setup_frame(
             str(video),

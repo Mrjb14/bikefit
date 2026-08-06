@@ -35,5 +35,12 @@ def detect_cycles(
     if len(pmb_indices) < 2:
         return []
 
-    cycles = [(int(pmb_indices[i]), int(pmb_indices[i + 1])) for i in range(len(pmb_indices) - 1)]
-    return cycles
+    # find_peaks renvoie des positions dans le tableau ; on les traduit en frame_idx,
+    # car c'est sur cette colonne que aggregate_cycles/aggregate_frontal_cycles
+    # découpent ensuite. Identique tant que le DataFrame part de la frame 0 sans trou,
+    # mais indispensable dès qu'il est tronqué (options --start/--end).
+    frame_ids = df["frame_idx"].to_numpy()
+    return [
+        (int(frame_ids[pmb_indices[i]]), int(frame_ids[pmb_indices[i + 1]]))
+        for i in range(len(pmb_indices) - 1)
+    ]

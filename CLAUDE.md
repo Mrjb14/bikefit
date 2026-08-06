@@ -15,7 +15,16 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, Tasks API MediaPipe v1.0).
 - `docs/aruco_marker_100mm.png` : marqueur ArUco à imprimer (DICT_4X4_50 ID=0, 100 mm).
 - `firmware/README.md` : installation du firmware ESP32-CAM (flux MJPEG, vue de face Phase 3C).
-- `data/` : vidéos pour les tests manuels du CLI (gitignorées, `*.mp4`).
+- `data/` : données locales, **entièrement gitignoré**. Séparation stricte entrées/sorties :
+  - `data/sources/` : vidéos et photos d'entrée (les seuls fichiers non regénérables).
+  - `data/outputs/` : tout ce que le CLI produit — `reports/` (HTML), `metrics/` (JSON),
+    `debug/` (vidéos `--debug-video`), `annotated/` (images de `measure-body`/`measure-setup`).
+
+  Une analyse n'écrit **jamais** à côté de sa source : les chemins par défaut viennent de
+  `REPORTS_DIR` / `ANNOTATED_DIR` (`_paths.py`), surchargeables par `BIKEFIT_OUTPUTS_DIR`.
+  Attention : la clé de cache des landmarks contient le chemin résolu de la vidéo —
+  déplacer un fichier source invalide son cache (renommer le `.parquet` correspondant
+  dans `~/.bikefit/cache/landmarks/` évite une ré-inférence complète).
 
 ## Principes non négociables
 1. **Précision avant tout** : chaque mesure est moyennée sur N cycles de pédalage,
@@ -117,14 +126,20 @@ uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
 
 # Pipeline complet (sans calibration)
-python -m bikefit video.mp4 --side right --profile triathlon_XL
+# Le rapport atterrit dans data/outputs/reports/<video>_<horodatage>.html
+python -m bikefit data/sources/video.mp4 --side right --profile triathlon_XL
+
+# Découpage : ignorer la montée sur le vélo et la descente (indispensable en pratique,
+# ces phases hors pédalage faussent les moyennes). Appliqué après le cache -> rejeu instantané.
+python -m bikefit data/sources/video.mp4 --side right --start 20 --end 70
 
 # Pipeline avec calibration ArUco (marqueur 100 mm collé sur le cadre)
-python -m bikefit video.mp4 --side right --marker-size 100 --save-session
+python -m bikefit data/sources/video.mp4 --side right --marker-size 100 --save-session
 
 # Pipeline avec vue de face (Phase 3C) — fichier ou flux MJPEG ESP32-CAM
-python -m bikefit video.mp4 --side right --front video_face.mp4
-python -m bikefit video.mp4 --side right --front http://192.168.1.42/stream --front-duration 60
+python -m bikefit data/sources/video.mp4 --side right --front data/sources/video_face.mp4 \
+  --start 20 --end 70 --front-start 20 --front-end 65
+python -m bikefit data/sources/video.mp4 --side right --front http://192.168.1.42/stream --front-duration 60
 
 # Vue de profil et vue de face toutes les deux en webcam (deux périphériques distincts)
 python -m bikefit webcam:0 --side right --duration 60 --front webcam:1 --front-duration 60
@@ -178,6 +193,6 @@ Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR
 - Le module ingest accepte fichier vidéo, flux réseau MJPEG (`http(s)://`/`rtsp://`) ET webcam locale
   (`webcam:<index>`) — vue de profil et vue de face acceptent les trois indifféremment, avec une
   vérification au lancement qu'elles ne pointent pas vers la même source.
-- Vidéos non versionnées (trop volumineuses) — dans `data/`, gitignorées.
+- Vidéos non versionnées (trop volumineuses) — dans `data/sources/`, gitignorées.
 - Marqueur ArUco : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal côté caméra.
   Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.

@@ -94,24 +94,75 @@ def _draw_hud(
         y += line_h
 
 
+# Mesure du fps réel (sources live) : fenêtre d'observation avant d'ouvrir le
+# fichier, et plafond mémoire du tampon pour ne pas exploser sur de la haute
+# résolution (on ouvre dès que l'une des deux limites est atteinte).
+_FPS_MEASURE_SECONDS = 2.0
+_FPS_MEASURE_MAX_BYTES = 64 * 1024 * 1024
+
+
 class DebugVideoWriter:
     """Écrit une vidéo MP4 annotée (squelette + HUD) frame par frame.
 
     Ne prend en entrée que des frames BGR déjà décodées et les données à superposer —
     jamais la source elle-même, pour rester utilisable quelle que soit son origine
     (fichier, flux réseau, webcam).
+
+    measure_fps : pour une source live (webcam/flux réseau), le fps annoncé par le
+    driver est le débit *nominal* du capteur, pas celui réellement obtenu — l'inférence
+    de pose tourne en ligne et ralentit la boucle. Écrire avec le fps nominal produit
+    une vidéo qui défile trop vite (30 déclarés pour ~20 réels = lecture 1,5×), ce qui
+    fausse la lecture de la cadence de pédalage. Dans ce mode, les premières frames
+    sont tamponnées le temps de mesurer le débit réel via leurs timestamps (horloge
+    murale), puis le fichier est ouvert au bon fps et le tampon vidé.
     """
 
-    def __init__(self, output_path: Path, width: int, height: int, fps: float) -> None:
+    def __init__(
+        self,
+        output_path: Path,
+        width: int,
+        height: int,
+        fps: float,
+        measure_fps: bool = False,
+    ) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._output_path = output_path
+        self._size = (width, height)
+        self._nominal_fps = fps if fps > 0 else 25.0
+        self._writer: cv2.VideoWriter | None = None
+        self._pending: list[np.ndarray] = []
+        self._pending_bytes = 0
+        self._first_ts: int | None = None
+        self._last_ts: int | None = None
+
+        if not measure_fps:
+            self._open(self._nominal_fps)
+
+    def _open(self, fps: float) -> None:
         # VideoWriter.fourcc (et non le legacy cv2.VideoWriter_fourcc, absent des
         # stubs) — valeur identique au runtime, vérifié sur OpenCV 4.x et 5.x.
         fourcc = cv2.VideoWriter.fourcc(*"mp4v")
-        self._writer = cv2.VideoWriter(
-            str(output_path), fourcc, fps if fps > 0 else 25.0, (width, height)
-        )
-        if not self._writer.isOpened():
-            raise RuntimeError(f"Impossible de créer la vidéo de debug : {output_path}")
+        writer = cv2.VideoWriter(str(self._output_path), fourcc, fps, self._size)
+        if not writer.isOpened():
+            raise RuntimeError(f"Impossible de créer la vidéo de debug : {self._output_path}")
+        self._writer = writer
+
+    def _measured_fps(self) -> float:
+        """fps réel déduit des timestamps tamponnés, nominal si indéterminable."""
+        if self._first_ts is None or self._last_ts is None or len(self._pending) < 2:
+            return self._nominal_fps
+        elapsed_s = (self._last_ts - self._first_ts) / 1000.0
+        if elapsed_s <= 0:
+            return self._nominal_fps
+        return (len(self._pending) - 1) / elapsed_s
+
+    def _flush_pending(self) -> None:
+        self._open(self._measured_fps())
+        assert self._writer is not None
+        for img in self._pending:
+            self._writer.write(img)
+        self._pending.clear()
+        self._pending_bytes = 0
 
     def write(
         self,
@@ -126,10 +177,29 @@ class DebugVideoWriter:
         if points_px is not None:
             _draw_skeleton(img, points_px)
         _draw_hud(img, hud_lines, detected, frame_idx, timestamp_ms)
-        self._writer.write(img)
+
+        if self._writer is not None:
+            self._writer.write(img)
+            return
+
+        # Mode mesure : on tamponne jusqu'à disposer d'un débit fiable.
+        if self._first_ts is None:
+            self._first_ts = timestamp_ms
+        self._last_ts = timestamp_ms
+        self._pending.append(img)
+        self._pending_bytes += img.nbytes
+
+        elapsed_s = (timestamp_ms - self._first_ts) / 1000.0
+        if elapsed_s >= _FPS_MEASURE_SECONDS or self._pending_bytes >= _FPS_MEASURE_MAX_BYTES:
+            self._flush_pending()
 
     def close(self) -> None:
-        self._writer.release()
+        # Capture plus courte que la fenêtre de mesure : on ouvre quand même,
+        # avec la meilleure estimation disponible, pour ne pas perdre les frames.
+        if self._writer is None:
+            self._flush_pending()
+        if self._writer is not None:
+            self._writer.release()
 
     def __enter__(self) -> DebugVideoWriter:
         return self
@@ -201,7 +271,11 @@ def render_debug_video_live(
     """
     from bikefit.pose.cache import _fl_to_dict, compute_landmarks
 
-    with DebugVideoWriter(output_path, reader.width, reader.height, reader.fps or 25.0) as writer:
+    # measure_fps : le débit réel d'une source live est imposé par la vitesse de
+    # l'inférence, pas par le fps nominal du capteur (cf. DebugVideoWriter).
+    with DebugVideoWriter(
+        output_path, reader.width, reader.height, reader.fps or 25.0, measure_fps=True
+    ) as writer:
 
         def _on_frame(frame: TimedFrame, fl: FrameLandmarks) -> None:
             row_df = pd.DataFrame([_fl_to_dict(fl)])

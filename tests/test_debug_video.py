@@ -153,6 +153,77 @@ class TestDebugVideoWriter:
         assert out.stat().st_size > 0
 
 
+class TestMeasuredFps:
+    """Source live : le fps écrit doit refléter le débit réel, pas le nominal.
+
+    Le fps nominal d'une webcam (30) n'est pas tenu quand l'inférence de pose tourne
+    en ligne (~20 réels) : écrire à 30 produit une vidéo qui défile 1,5× trop vite et
+    fausse la lecture de la cadence de pédalage.
+    """
+
+    @staticmethod
+    def _write(out: Path, n: int, interval_ms: int, measure_fps: bool) -> None:
+        frame = np.zeros((48, 64, 3), dtype=np.uint8)
+        with DebugVideoWriter(
+            out, width=64, height=48, fps=30.0, measure_fps=measure_fps
+        ) as writer:
+            for i in range(n):
+                writer.write(
+                    frame,
+                    points_px=None,
+                    hud_lines=[],
+                    detected=False,
+                    frame_idx=i,
+                    timestamp_ms=i * interval_ms,
+                )
+
+    @staticmethod
+    def _fps_of(path: Path) -> float:
+        cap = cv2.VideoCapture(str(path))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+        return fps
+
+    def test_uses_real_rate_not_nominal(self, tmp_path: Path) -> None:
+        out = tmp_path / "live.mp4"
+        # 50 ms entre frames = 20 fps réels, alors que le nominal annoncé est 30
+        self._write(out, n=80, interval_ms=50, measure_fps=True)
+        assert self._fps_of(out) == pytest.approx(20.0, abs=1.0)
+
+    def test_nominal_kept_when_not_measuring(self, tmp_path: Path) -> None:
+        # Source fichier : le fps déclaré est fiable, on ne doit pas le recalculer
+        out = tmp_path / "file.mp4"
+        self._write(out, n=80, interval_ms=50, measure_fps=False)
+        assert self._fps_of(out) == pytest.approx(30.0, abs=0.1)
+
+    def test_no_frame_lost_while_buffering(self, tmp_path: Path) -> None:
+        out = tmp_path / "live.mp4"
+        self._write(out, n=80, interval_ms=50, measure_fps=True)
+        cap = cv2.VideoCapture(str(out))
+        count = 0
+        while True:
+            ok, _ = cap.read()
+            if not ok:
+                break
+            count += 1
+        cap.release()
+        assert count == 80
+
+    def test_capture_shorter_than_measure_window(self, tmp_path: Path) -> None:
+        # 5 frames en 200 ms : on n'atteint jamais la fenêtre de 2 s, le fichier
+        # doit quand même être écrit à la fermeture, sans perdre de frame.
+        out = tmp_path / "short.mp4"
+        self._write(out, n=5, interval_ms=50, measure_fps=True)
+        assert out.exists() and out.stat().st_size > 0
+        assert self._fps_of(out) == pytest.approx(20.0, abs=1.0)
+
+    def test_single_frame_falls_back_to_nominal(self, tmp_path: Path) -> None:
+        # Une seule frame : aucun intervalle mesurable, on retombe sur le nominal
+        out = tmp_path / "one.mp4"
+        self._write(out, n=1, interval_ms=50, measure_fps=True)
+        assert self._fps_of(out) == pytest.approx(30.0, abs=0.1)
+
+
 # ── render_debug_video_from_landmarks (fichier) ─────────────────────────────────
 
 
