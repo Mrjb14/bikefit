@@ -17,7 +17,7 @@ from bikefit.recommend.models import FitReport, Priorite, Recommendation
 _TARGETS_PATH = CONFIG_DIR / "targets_tt.yaml"
 
 
-def _load_targets(profile: str) -> dict:
+def _load_targets(profile: str) -> tuple[dict, dict]:
     data = yaml.safe_load(_TARGETS_PATH.read_text(encoding="utf-8"))
     if profile not in data:
         available = [k for k in data if not k.startswith("_") and isinstance(data[k], dict)]

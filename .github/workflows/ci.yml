@@ -5,9 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# Annule les runs devenus obsolètes quand on pousse plusieurs fois sur une PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    name: Lint & Format
+    name: Lint & Format & Types
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,13 +28,22 @@ jobs:
       - name: Ruff — vérification du formatage
         run: uv run ruff format --check src tests scripts
 
+      - name: Mypy — vérification des types
+        run: uv run mypy src
+
   tests:
-    name: Tests (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python: ["3.11", "3.12"]
+        # Windows = plateforme de dev principale. Les bugs d'encodage console
+        # (cp1252) et de séparateurs de chemin ne se voient que là.
+        include:
+          - os: windows-latest
+            python: "3.12"
 
     steps:
       - uses: actions/checkout@v7
@@ -42,4 +56,6 @@ jobs:
         run: uv sync --extra dev
 
       - name: Pytest + couverture
-        run: uv run pytest --cov=src/bikefit --cov-report=term-missing
+        # Seuil = niveau actuel (71 %) moins une marge : empêche la régression
+        # sans bloquer sur une variation mineure entre plateformes.
+        run: uv run pytest --cov=src/bikefit --cov-report=term-missing --cov-fail-under=65

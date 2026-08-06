@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -24,7 +26,7 @@ def estimate_bike_setup(
     image_width: int,
     image_height: int,
     side: Side = "right",
-) -> dict[str, float | None]:
+) -> dict[str, Any]:
     """Estime setup_actuel depuis les landmarks de pose et la calibration mm/pixel.
 
     Principe :

@@ -104,7 +104,9 @@ class DebugVideoWriter:
 
     def __init__(self, output_path: Path, width: int, height: int, fps: float) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        # VideoWriter.fourcc (et non le legacy cv2.VideoWriter_fourcc, absent des
+        # stubs) — valeur identique au runtime, vérifié sur OpenCV 4.x et 5.x.
+        fourcc = cv2.VideoWriter.fourcc(*"mp4v")
         self._writer = cv2.VideoWriter(
             str(output_path), fourcc, fps if fps > 0 else 25.0, (width, height)
         )

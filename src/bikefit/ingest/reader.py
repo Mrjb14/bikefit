@@ -105,9 +105,10 @@ class VideoReader:
         self._is_stream = isinstance(path, str) and _is_stream_url(path)
         self._is_webcam = isinstance(path, str) and _is_webcam_source(path)
 
+        self._source: str
         if self._is_stream or self._is_webcam:
             self._path: Path | None = None
-            self._source = path
+            self._source = str(path)
         else:
             self._path = Path(path)
             if not self._path.exists():
