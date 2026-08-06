@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 
 from bikefit.kinematics.landmarks import BODY, Side
-from bikefit.kinematics.visibility import VISIBILITY_THRESHOLD, reliability_mask
+from bikefit.kinematics.visibility import (
+    VISIBILITY_THRESHOLD,
+    reliability_mask,
+    weakest_visibility,
+)
 
 
 def _px(df: pd.DataFrame, lm_idx: int, width: int, height: int) -> np.ndarray:
@@ -61,19 +65,17 @@ def compute_frontal_metrics(
         hip = _px(df, BODY[side]["hip"], width, height)
         knee = _px(df, BODY[side]["knee"], width, height)
         ankle = _px(df, BODY[side]["ankle"], width, height)
+        idx = (BODY[side]["hip"], BODY[side]["knee"], BODY[side]["ankle"])
         rows[key] = _knee_deviation_angle(hip, ankle, knee)
-        unreliable[key] = ~reliability_mask(
-            df,
-            (BODY[side]["hip"], BODY[side]["knee"], BODY[side]["ankle"]),
-            visibility_threshold,
-        )
+        rows[f"{key}_vis"] = weakest_visibility(df, idx)
+        unreliable[key] = ~reliability_mask(df, idx, visibility_threshold)
 
     left_elbow = _px(df, BODY["left"]["elbow"], width, height)
     right_elbow = _px(df, BODY["right"]["elbow"], width, height)
+    elbow_idx = (BODY["left"]["elbow"], BODY["right"]["elbow"])
     rows["largeur_coudes_px"] = np.linalg.norm(left_elbow - right_elbow, axis=1)
-    unreliable["largeur_coudes_px"] = ~reliability_mask(
-        df, (BODY["left"]["elbow"], BODY["right"]["elbow"]), visibility_threshold
-    )
+    rows["largeur_coudes_px_vis"] = weakest_visibility(df, elbow_idx)
+    unreliable["largeur_coudes_px"] = ~reliability_mask(df, elbow_idx, visibility_threshold)
 
     # Propagation NaN : frame non détectée, ou point inféré plutôt qu'observé
     not_detected = ~df["detected"].to_numpy(dtype=bool)

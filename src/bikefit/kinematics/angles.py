@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 
 from bikefit.kinematics.landmarks import ANGLE_JOINTS, BODY, Side
-from bikefit.kinematics.visibility import VISIBILITY_THRESHOLD, reliability_mask
+from bikefit.kinematics.visibility import (
+    VISIBILITY_THRESHOLD,
+    reliability_mask,
+    weakest_visibility,
+)
 
 
 def _px(df: pd.DataFrame, lm_idx: int, width: int, height: int) -> np.ndarray:
@@ -57,17 +61,17 @@ def compute_angles(
         a = _px(df, joints[pa], width, height)
         b = _px(df, joints[pb], width, height)
         c = _px(df, joints[pc], width, height)
+        idx = (joints[pa], joints[pb], joints[pc])
         rows[angle_name] = _vec_angle(a, b, c)
-        unreliable[angle_name] = ~reliability_mask(
-            df, (joints[pa], joints[pb], joints[pc]), visibility_threshold
-        )
+        rows[f"{angle_name}_vis"] = weakest_visibility(df, idx)
+        unreliable[angle_name] = ~reliability_mask(df, idx, visibility_threshold)
 
     shoulder = _px(df, joints["shoulder"], width, height)
     hip = _px(df, joints["hip"], width, height)
+    trunk_idx = (joints["shoulder"], joints["hip"])
     rows["tronc"] = _trunk_angle(shoulder, hip)
-    unreliable["tronc"] = ~reliability_mask(
-        df, (joints["shoulder"], joints["hip"]), visibility_threshold
-    )
+    rows["tronc_vis"] = weakest_visibility(df, trunk_idx)
+    unreliable["tronc"] = ~reliability_mask(df, trunk_idx, visibility_threshold)
 
     # Propagation NaN : frame non détectée, ou sommet inféré plutôt qu'observé
     not_detected = ~df["detected"].to_numpy(dtype=bool)

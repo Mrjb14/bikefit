@@ -11,6 +11,19 @@ class AngleStats(BaseModel):
     min: float
     max: float
     n_cycles: int
+    # Indice de confiance (principe n°1 : toute métrique porte sa fiabilité).
+    # visibility : visibilité moyenne du sommet le moins bien vu de l'angle.
+    # frames_kept : part des frames réellement exploitées après filtrage —
+    # une valeur basse signale une métrique calculée sur une minorité de frames.
+    visibility: float | None = None
+    frames_kept: float | None = None
+
+    @property
+    def is_reliable(self) -> bool:
+        """Faux si la mesure repose majoritairement sur des points inférés."""
+        if self.visibility is None or self.frames_kept is None:
+            return True
+        return self.visibility >= 0.5 and self.frames_kept >= 0.5
 
 
 class FitMetrics(BaseModel):

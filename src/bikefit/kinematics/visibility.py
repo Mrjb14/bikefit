@@ -45,6 +45,13 @@ def reliability_mask(
         return np.all(np.nan_to_num(vis, nan=0.0) >= threshold, axis=1)
 
 
+def weakest_visibility(df: pd.DataFrame, lm_indices: tuple[int, ...]) -> np.ndarray:
+    """Visibilité du sommet le moins bien vu, frame par frame."""
+    vis = np.stack([landmark_visibility(df, i) for i in lm_indices], axis=1)
+    with np.errstate(invalid="ignore"):
+        return np.nanmin(vis, axis=1)
+
+
 def mean_visibility(
     df: pd.DataFrame,
     lm_indices: tuple[int, ...],

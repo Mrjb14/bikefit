@@ -127,3 +127,54 @@ class TestFrontalFiltering:
 
 def test_threshold_default_is_documented_value() -> None:
     assert VISIBILITY_THRESHOLD == 0.5
+
+
+class TestConfidenceReporting:
+    """Une métrique doit porter sa fiabilité, pas la laisser deviner (principe n°1)."""
+
+    def _metrics(self, vis: float) -> object:
+        from bikefit.kinematics.aggregate import aggregate_cycles
+        from bikefit.kinematics.cycles import detect_cycles
+
+        n, fps = 300, 30.0
+        t = np.arange(n)
+        # Genou décalé en x : la jambe n'est jamais parfaitement alignée, donc pas de
+        # vecteur nul quand la cheville passe à la hauteur du genou.
+        ankle_y = 0.65 - 0.15 * np.cos(2 * np.pi * t / 20)
+        rows = []
+        for i in range(n):
+            row: dict = {"frame_idx": i, "timestamp_ms": int(i * 1000 / fps), "detected": True}
+            for j in range(33):
+                row[f"lm_{j}_x"], row[f"lm_{j}_y"] = 0.5, 0.5
+                row[f"lm_{j}_vis"] = 0.95
+            row["lm_24_x"], row["lm_24_y"] = 0.50, 0.20  # hanche
+            row["lm_26_x"], row["lm_26_y"] = 0.56, 0.45  # genou (hors axe)
+            row["lm_28_x"], row["lm_28_y"] = 0.50, ankle_y[i]  # cheville
+            row[f"lm_{BODY['right']['knee']}_vis"] = vis
+            rows.append(row)
+        df = pd.DataFrame(rows)
+        angles = compute_angles(df, "right", 1000, 1000)
+        return aggregate_cycles(angles, detect_cycles(df, "right", fps))
+
+    def test_reliable_metric_is_flagged_reliable(self) -> None:
+        m = self._metrics(vis=0.95)
+        assert m.genou_extension_pmb.visibility == pytest.approx(0.95, abs=0.01)
+        assert m.genou_extension_pmb.frames_kept == pytest.approx(1.0, abs=0.01)
+        assert m.genou_extension_pmb.is_reliable
+
+    def test_inferred_knee_refuses_to_produce_metrics(self) -> None:
+        """Genou inféré -> l'agrégation échoue au lieu de sortir des chiffres devinés.
+
+        Le genou est la métrique pivot de la vue de profil : s'il n'est pas observé,
+        mieux vaut une erreur actionnable qu'un rapport d'apparence normale.
+        """
+        with pytest.raises(ValueError, match="Aucun cycle valide"):
+            self._metrics(vis=0.2)
+
+    def test_stats_without_confidence_default_to_reliable(self) -> None:
+        from bikefit.kinematics.metrics import AngleStats
+
+        # Rétrocompatibilité : une session enregistrée avant ce champ reste lisible
+        s = AngleStats(mean=140.0, std=2.0, min=138.0, max=142.0, n_cycles=10)
+        assert s.visibility is None
+        assert s.is_reliable
