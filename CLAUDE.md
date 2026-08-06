@@ -30,9 +30,13 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
    attention aux signes dans les calculs d'angles.
 
 ## Architecture (src/bikefit/)
-- `ingest/` : `VideoReader` — fichier vidéo (OpenCV) ou flux réseau MJPEG (`http(s)://`/`rtsp://`,
-  ex. ESP32-CAM) via parsing manuel des marqueurs JPEG SOI/EOI, itérateur de frames horodatées
-  (`TimedFrame`). Flux réseau : timestamps sur horloge murale, pas de fps fiable côté source.
+- `ingest/` : `VideoReader` — fichier vidéo (OpenCV), flux réseau MJPEG (`http(s)://`/`rtsp://`,
+  ex. ESP32-CAM, via parsing manuel des marqueurs JPEG SOI/EOI) ou webcam locale (`webcam:<index>`,
+  ex. `webcam:0`, via `cv2.VideoCapture(index)`), itérateur de frames horodatées (`TimedFrame`).
+  Flux réseau et webcam (`is_live`) : timestamps sur horloge murale, pas de fps fiable côté source,
+  pas de fin naturelle → capture bornée dans le temps côté CLI (`--duration`/`--front-duration`).
+  `_same_source(a, b)` : compare deux sources (fichier résolu, ou chaîne exacte pour flux/webcam) —
+  utilisé par le CLI pour interdire de lancer les vues profil et face sur la même caméra.
 - `pose/` : protocole `PoseEstimator` + `MediaPipePoseEstimator` (Tasks API, `pose_landmarker_heavy`) + `LandmarkCache` (Parquet).
 - `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y),
   `compute_angles` (genou, hanche, tronc, coude, cheville — vectorisé NumPy), `aggregate_cycles` → `FitMetrics`.
@@ -91,7 +95,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (87 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG, report HTML, CLI)
+# Tests (103 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG/webcam, report HTML, CLI)
 python -m pytest
 
 # Lint + format
@@ -107,6 +111,10 @@ python -m bikefit video.mp4 --side right --marker-size 100 --save-session
 # Pipeline avec vue de face (Phase 3C) — fichier ou flux MJPEG ESP32-CAM
 python -m bikefit video.mp4 --side right --front video_face.mp4
 python -m bikefit video.mp4 --side right --front http://192.168.1.42/stream --front-duration 60
+
+# Vue de profil et vue de face toutes les deux en webcam (deux périphériques distincts)
+python -m bikefit webcam:0 --side right --duration 60 --front webcam:1 --front-duration 60
+# webcam:0 des deux côtés -> rejeté (Erreur : --front pointe vers la même source ...)
 
 # Historique des sessions
 python -m bikefit history
@@ -148,7 +156,9 @@ Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR
 - ESP32-CAM (basse résolution ~15-25 fps) — vue de face (Phase 3C), flux MJPEG HTTP, `--front`.
   Firmware et doc de flash dans `firmware/`. Limite matérielle : un seul client HTTP à la fois
   (`WiFiServer` basique côté firmware) — fermer tout autre lecteur du flux avant de lancer une capture.
-- Le module ingest accepte fichier vidéo ET flux réseau MJPEG (`http(s)://`/`rtsp://`).
+- Le module ingest accepte fichier vidéo, flux réseau MJPEG (`http(s)://`/`rtsp://`) ET webcam locale
+  (`webcam:<index>`) — vue de profil et vue de face acceptent les trois indifféremment, avec une
+  vérification au lancement qu'elles ne pointent pas vers la même source.
 - Vidéos non versionnées (trop volumineuses) — dans `data/`, gitignorées.
 - Marqueur ArUco : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal côté caméra.
   Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.

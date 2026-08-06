@@ -77,6 +77,29 @@ class TestAnalyzeValidation:
         assert result.exit_code == 1
         assert "--side" in result.output
 
+    def test_front_same_file_as_video_exits_1(self, tmp_path: Path) -> None:
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"\x00")
+        result = runner.invoke(app, ["analyze", str(video), "--front", str(video)])
+        assert result.exit_code == 1
+        assert "même source" in result.output.lower()
+
+    def test_front_same_webcam_index_exits_1(self) -> None:
+        # Ni video ni front n'ont besoin d'une vraie webcam : la garde anti-double-usage
+        # s'exécute avant toute ouverture de caméra.
+        result = runner.invoke(app, ["analyze", "webcam:0", "--front", "webcam:0"])
+        assert result.exit_code == 1
+        assert "même source" in result.output.lower()
+
+    def test_front_different_file_does_not_trigger_same_source_guard(self, tmp_path: Path) -> None:
+        video = tmp_path / "video.mp4"
+        front = tmp_path / "front.mp4"
+        video.write_bytes(b"\x00")
+        front.write_bytes(b"\x00")
+        result = runner.invoke(app, ["analyze", str(video), "--front", str(front)])
+        # Fichiers bidon -> échoue plus loin (vidéo illisible), mais pas sur la garde.
+        assert "même source" not in result.output.lower()
+
 
 # ── history ──────────────────────────────────────────────────────────────────
 

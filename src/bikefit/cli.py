@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -26,15 +27,25 @@ _ANGLE_LABELS = {
 
 @app.command()
 def analyze(
-    video: Annotated[Path, typer.Argument(help="Vidéo de profil (mp4/mov)")],
+    video: Annotated[
+        str,
+        typer.Argument(
+            help="Vidéo de profil : fichier (mp4/mov), flux MJPEG (http://...) ou webcam (webcam:0)"
+        ),
+    ],
+    duration: Annotated[
+        float, typer.Option(help="Durée de capture (s) si `video` est un flux réseau ou une webcam")
+    ] = 15.0,
     front: Annotated[
         str | None,
         typer.Option(
-            help="Vidéo (fichier) ou flux MJPEG (URL http://...) vue de face, optionnel — Phase 3C"
+            help="Vidéo de face : fichier, flux MJPEG (http://...) ou webcam (webcam:0),"
+            " optionnel — Phase 3C"
         ),
     ] = None,
     front_duration: Annotated[
-        float, typer.Option(help="Durée de capture (s) si --front est un flux réseau")
+        float,
+        typer.Option(help="Durée de capture (s) si --front est un flux réseau ou une webcam"),
     ] = 15.0,
     bike: Annotated[str, typer.Option(help="Fiche vélo dans config/bikes/")] = "giant_trinity_2019",
     side: Annotated[str, typer.Option(help="right | left — côté filmé")] = "right",
@@ -57,6 +68,7 @@ def analyze(
     """Analyse une vidéo et produit les métriques de fitting + recommandations."""
     from bikefit.equipment import load_bike_profile, load_rider_profile
     from bikefit.ingest import VideoReader
+    from bikefit.ingest.reader import _is_stream_url, _is_webcam_source, _same_source
     from bikefit.kinematics import (
         aggregate_cycles,
         aggregate_frontal_cycles,
@@ -70,7 +82,10 @@ def analyze(
     from bikefit.recommend import recommend as run_recommend
     from bikefit.report import render_html
 
-    if not video.exists():
+    video_is_live = _is_stream_url(video) or _is_webcam_source(video)
+    video_path = Path(video)
+
+    if not video_is_live and not video_path.exists():
         typer.echo(f"Erreur : vidéo introuvable : {video}", err=True)
         raise typer.Exit(1)
 
@@ -78,26 +93,40 @@ def analyze(
         typer.echo("Erreur : --side doit être 'right' ou 'left'", err=True)
         raise typer.Exit(1)
 
+    if front is not None and _same_source(video, front):
+        typer.echo(
+            "Erreur : --front pointe vers la même source que la vidéo de profil"
+            " (fichier, flux ou webcam) — impossible de lancer les deux vues sur"
+            " la même caméra.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     # ── Ingest ───────────────────────────────────────────────────────────────
     reader = VideoReader(video)
+    kind_note = " (webcam)" if reader.is_webcam else " (flux réseau)" if reader.is_stream else ""
     typer.echo(
         f"Vidéo : {reader.width}x{reader.height}"
-        f" @ {reader.fps:.1f} fps, {reader.frame_count} frames"
+        f" @ {reader.fps:.1f} fps, {reader.frame_count} frames{kind_note}"
     )
 
-    # ── Pose (avec cache Parquet) ─────────────────────────────────────────────
+    # ── Pose (avec cache Parquet, sauf source live) ──────────────────────────
     cache = LandmarkCache(CACHE_DIR / "landmarks")
-    if no_cache:
-        from bikefit.pose.cache import _video_key
-
-        key = _video_key(video)
-        cache_file = CACHE_DIR / "landmarks" / f"{video.stem}_{key}.parquet"
-        if cache_file.exists():
-            cache_file.unlink()
-            typer.echo("Cache supprimé.")
-
     with MediaPipePoseEstimator() as estimator:
-        df = cache.get_or_compute(video, reader, estimator)
+        if video_is_live:
+            typer.echo(f"Capture {duration:.0f}s...")
+            df = compute_landmarks(reader, estimator, max_duration_s=duration)
+        else:
+            if no_cache:
+                from bikefit.pose.cache import _video_key
+
+                key = _video_key(video_path)
+                cache_file = CACHE_DIR / "landmarks" / f"{video_path.stem}_{key}.parquet"
+                if cache_file.exists():
+                    cache_file.unlink()
+                    typer.echo("Cache supprimé.")
+
+            df = cache.get_or_compute(video_path, reader, estimator)
 
     detection_rate = df["detected"].mean()
     typer.echo(f"Taux de détection : {detection_rate:.1%}")
@@ -115,31 +144,44 @@ def analyze(
 
     # ── Calibration ArUco (optionnelle) ──────────────────────────────────────
     if marker_size is not None:
-        from bikefit.calibration import calibrate_from_video
-
-        typer.echo(f"Calibration ArUco (marqueur {marker_size:.0f} mm)...")
-        calib = calibrate_from_video(str(video), marker_size_mm=marker_size)
-        if calib is None:
-            typer.echo("Avertissement : aucun marqueur ArUco détecté.", err=True)
-        else:
-            metrics = metrics.model_copy(update={"calibration": calib})
-            status = "fiable" if calib.is_reliable else "peu fiable"
+        if video_is_live:
             typer.echo(
-                f"Calibration {status} : {calib.mm_per_pixel:.4f} mm/px"
-                f" ({calib.n_detected}/{calib.n_sampled} frames)"
+                "Avertissement : calibration ArUco non supportée pour un flux réseau ou"
+                " une webcam (--marker-size ignoré) — utiliser un fichier vidéo.",
+                err=True,
             )
+        else:
+            from bikefit.calibration import calibrate_from_video
+
+            typer.echo(f"Calibration ArUco (marqueur {marker_size:.0f} mm)...")
+            calib = calibrate_from_video(str(video_path), marker_size_mm=marker_size)
+            if calib is None:
+                typer.echo("Avertissement : aucun marqueur ArUco détecté.", err=True)
+            else:
+                metrics = metrics.model_copy(update={"calibration": calib})
+                status = "fiable" if calib.is_reliable else "peu fiable"
+                typer.echo(
+                    f"Calibration {status} : {calib.mm_per_pixel:.4f} mm/px"
+                    f" ({calib.n_detected}/{calib.n_sampled} frames)"
+                )
 
     # ── Vue de face (optionnelle, Phase 3C) ──────────────────────────────────
     if front is not None:
         typer.echo(f"\nVue de face : {front}")
         front_reader = VideoReader(front)
+        if front_reader.is_webcam:
+            front_kind_note = " (webcam)"
+        elif front_reader.is_stream:
+            front_kind_note = " (flux réseau)"
+        else:
+            front_kind_note = ""
         typer.echo(
             f"  {front_reader.width}x{front_reader.height} @ {front_reader.fps:.1f} fps"
-            + (" (flux réseau)" if front_reader.is_stream else "")
+            f"{front_kind_note}"
         )
 
         with MediaPipePoseEstimator() as front_estimator:
-            if front_reader.is_stream:
+            if front_reader.is_live:
                 typer.echo(f"  Capture {front_duration:.0f}s...")
                 front_df = compute_landmarks(
                     front_reader, front_estimator, max_duration_s=front_duration
@@ -219,11 +261,14 @@ def analyze(
         "bike": bike_profile,
     }
     if report:
-        render_html(metrics, fit_report, angle_df, video, report, **_report_kwargs)
+        render_html(metrics, fit_report, angle_df, video_path, report, **_report_kwargs)
         typer.echo(f"Rapport HTML -> {report}")
     else:
-        default_report = video.with_suffix(".html")
-        render_html(metrics, fit_report, angle_df, video, default_report, **_report_kwargs)
+        if video_is_live:
+            default_report = Path(f"bikefit_{datetime.now():%Y%m%d_%H%M%S}.html")
+        else:
+            default_report = video_path.with_suffix(".html")
+        render_html(metrics, fit_report, angle_df, video_path, default_report, **_report_kwargs)
         typer.echo(f"Rapport HTML -> {default_report}")
 
     # ── Session SQLite ────────────────────────────────────────────────────────
@@ -233,7 +278,7 @@ def analyze(
         store = SessionStore(db)
         session = store.save(
             Session(
-                video_path=str(video.resolve()),
+                video_path=video if video_is_live else str(video_path.resolve()),
                 bike_name=bike,
                 rider_name=rider if rider_profile is not None else None,
                 profile=profile,

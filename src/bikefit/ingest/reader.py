@@ -10,8 +10,9 @@ import cv2
 import numpy as np
 
 _STREAM_PREFIXES = ("http://", "https://", "rtsp://")
+_WEBCAM_PREFIX = "webcam:"
 
-# fps indicatif si le flux ne le déclare pas (ESP32-CAM ~15-25 fps, cf. CLAUDE.md).
+# fps indicatif si le flux/la webcam ne le déclare pas (ESP32-CAM ~15-25 fps, cf. CLAUDE.md).
 # N'est jamais utilisé pour l'horodatage (voir frames()) — affichage/info seulement.
 _STREAM_FALLBACK_FPS = 20.0
 
@@ -22,6 +23,38 @@ _CHUNK_SIZE = 4096
 
 def _is_stream_url(source: str) -> bool:
     return source.startswith(_STREAM_PREFIXES)
+
+
+def _is_webcam_source(source: str) -> bool:
+    return source.startswith(_WEBCAM_PREFIX)
+
+
+def _webcam_index(source: str) -> int:
+    """Extrait l'index depuis 'webcam:<N>' (ex. 'webcam:0' -> 0)."""
+    raw = source[len(_WEBCAM_PREFIX) :]
+    if not raw.isdigit():
+        raise ValueError(
+            f"Index webcam invalide : {source!r} — attendu 'webcam:<N>' (ex. 'webcam:0')."
+        )
+    return int(raw)
+
+
+def _same_source(a: str, b: str) -> bool:
+    """True si `a` et `b` désignent la même source (fichier, flux réseau ou webcam).
+
+    Utilisé pour empêcher de lancer les vues profil et face sur la même caméra/fichier.
+    Les fichiers sont comparés par chemin résolu (deux façons d'écrire le même fichier
+    comptent comme identiques) ; flux et webcams sont comparés en chaîne (l'URL ou
+    l'index doit correspondre exactement).
+    """
+    a_live = _is_stream_url(a) or _is_webcam_source(a)
+    b_live = _is_stream_url(b) or _is_webcam_source(b)
+    if a_live or b_live:
+        return a == b
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return a == b
 
 
 def _iter_mjpeg_frames(url: str, timeout: float = 10.0) -> Iterator[np.ndarray]:
@@ -57,18 +90,22 @@ class TimedFrame:
 
 
 class VideoReader:
-    """Lit une vidéo locale (fichier) ou un flux réseau MJPEG (ESP32-CAM, Phase 3C).
+    """Lit une vidéo locale (fichier), un flux réseau MJPEG (ESP32-CAM, Phase 3C)
+    ou une webcam locale (`webcam:<index>`, ex. `webcam:0`).
 
-    Pour un flux réseau : frame_count est inconnu (0, flux continu, pas de fin),
-    et le fps déclaré par la source n'est généralement pas fiable → les timestamps
-    sont calculés à partir de l'horloge murale au moment de la capture plutôt que
-    d'un fps fixe (frame_idx * 1000 / fps), pour rester exacts malgré la gigue réseau.
+    Pour un flux réseau ou une webcam : frame_count est inconnu (0, capture continue,
+    pas de fin), et le fps déclaré par la source n'est généralement pas fiable → les
+    timestamps sont calculés à partir de l'horloge murale au moment de la capture
+    plutôt que d'un fps fixe (frame_idx * 1000 / fps), pour rester exacts malgré la
+    gigue réseau/matérielle. Ces deux sources n'ont pas de fin naturelle : borner la
+    capture dans le temps (ex. `--duration`/`--front-duration` côté CLI) est nécessaire.
     """
 
     def __init__(self, path: Path | str) -> None:
         self._is_stream = isinstance(path, str) and _is_stream_url(path)
+        self._is_webcam = isinstance(path, str) and _is_webcam_source(path)
 
-        if self._is_stream:
+        if self._is_stream or self._is_webcam:
             self._path: Path | None = None
             self._source = path
         else:
@@ -85,6 +122,17 @@ class VideoReader:
             self._height, self._width = first_frame.shape[:2]
             self._frame_count = 0
             self._fps = _STREAM_FALLBACK_FPS
+        elif self._is_webcam:
+            self._webcam_index = _webcam_index(self._source)
+            cap = cv2.VideoCapture(self._webcam_index)
+            if not cap.isOpened():
+                cap.release()
+                raise RuntimeError(f"Impossible d'ouvrir la webcam : index {self._webcam_index}")
+            self._fps = cap.get(cv2.CAP_PROP_FPS) or _STREAM_FALLBACK_FPS
+            self._width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self._height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            self._frame_count = 0
+            cap.release()
         else:
             cap = cv2.VideoCapture(self._source)
             if not cap.isOpened():
@@ -115,9 +163,20 @@ class VideoReader:
     def is_stream(self) -> bool:
         return self._is_stream
 
+    @property
+    def is_webcam(self) -> bool:
+        return self._is_webcam
+
+    @property
+    def is_live(self) -> bool:
+        """True si la source n'a pas de fin naturelle (flux réseau ou webcam)."""
+        return self._is_stream or self._is_webcam
+
     def frames(self) -> Iterator[TimedFrame]:
         if self._is_stream:
             yield from self._frames_stream()
+        elif self._is_webcam:
+            yield from self._frames_webcam()
         else:
             yield from self._frames_file()
 
@@ -129,6 +188,27 @@ class VideoReader:
                 frame_idx=frame_idx,
                 frame_bgr=frame,
             )
+
+    def _frames_webcam(self) -> Iterator[TimedFrame]:
+        cap = cv2.VideoCapture(self._webcam_index)
+        if not cap.isOpened():
+            cap.release()
+            raise RuntimeError(f"Impossible d'ouvrir la webcam : index {self._webcam_index}")
+        start = time.monotonic()
+        try:
+            frame_idx = 0
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                yield TimedFrame(
+                    timestamp_ms=int((time.monotonic() - start) * 1000),
+                    frame_idx=frame_idx,
+                    frame_bgr=frame,
+                )
+                frame_idx += 1
+        finally:
+            cap.release()
 
     def _frames_file(self) -> Iterator[TimedFrame]:
         cap = cv2.VideoCapture(self._source)
