@@ -35,13 +35,14 @@ class SessionStore:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_DDL)
-            # Apply forward migrations silently (column may already exist)
+            # Apply forward migrations, ignoring only "column already exists"
             for sql in _MIGRATIONS:
                 try:
                     conn.execute(sql)
                     conn.commit()
-                except Exception:
-                    pass
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc):
+                        raise
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
