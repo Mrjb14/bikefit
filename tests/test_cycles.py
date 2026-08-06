@@ -117,3 +117,42 @@ class TestDetectCycles:
         # Moins de 2 PMB → aucun cycle complet mesurable
         df = _pedaling_df(n_cycles=0.5)
         assert detect_cycles(df, "right", fps=30.0) == []
+
+
+class TestFrameIdxAlignment:
+    """Les bornes renvoyées sont des frame_idx, pas des positions de tableau.
+
+    aggregate_cycles découpe avec `angle_df["frame_idx"] >= start`. Si detect_cycles
+    renvoyait des positions, tout DataFrame tronqué (options --start/--end) produirait
+    des fenêtres décalées — silencieusement, car un masque vide donne des NaN que
+    pandas ignore ensuite dans les moyennes.
+    """
+
+    def test_offset_dataframe_returns_frame_idx(self) -> None:
+        df = _pedaling_df(n_cycles=6)
+        offset = 558
+        df["frame_idx"] = df["frame_idx"] + offset
+
+        cycles = detect_cycles(df, "right", fps=30.0)
+        assert cycles, "des cycles doivent être détectés"
+        for start, end in cycles:
+            assert start >= offset
+            assert end <= int(df["frame_idx"].max())
+
+    def test_offset_windows_select_real_rows(self) -> None:
+        # Le test qui aurait attrapé le bug : chaque fenêtre doit sélectionner des lignes
+        df = _pedaling_df(n_cycles=6)
+        df["frame_idx"] = df["frame_idx"] + 558
+
+        for start, end in detect_cycles(df, "right", fps=30.0):
+            mask = (df["frame_idx"] >= start) & (df["frame_idx"] <= end)
+            assert mask.sum() > 0
+
+    def test_matches_positions_when_starting_at_zero(self) -> None:
+        # Cas historique (vidéo entière) : frame_idx == position, résultat inchangé
+        df = _pedaling_df(n_cycles=6)
+        cycles = detect_cycles(df, "right", fps=30.0)
+        frame_ids = df["frame_idx"].to_numpy()
+        for start, end in cycles:
+            assert frame_ids[start] == start
+            assert frame_ids[end] == end
