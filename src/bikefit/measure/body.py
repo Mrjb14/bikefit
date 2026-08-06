@@ -44,7 +44,8 @@ def estimate_body_measurements(
     wl = result.pose_world_landmarks[0]
 
     def _y(i: int) -> float:
-        return wl[i].y  # y=bas dans les world_landmarks MediaPipe (même convention que les frames image)
+        # y=bas dans les world_landmarks MediaPipe (même convention que les frames image)
+        return wl[i].y
 
     def _x(i: int) -> float:
         return wl[i].x

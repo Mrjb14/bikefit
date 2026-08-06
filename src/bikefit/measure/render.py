@@ -11,31 +11,43 @@ import pandas as pd
 
 # Connexions squelette MediaPipe à tracer
 _SKELETON = [
-    (11, 12), (11, 23), (12, 24), (23, 24),      # torse
-    (11, 13), (13, 15),                             # bras gauche
-    (12, 14), (14, 16),                             # bras droit
-    (23, 25), (25, 27), (27, 29), (27, 31),        # jambe gauche
-    (24, 26), (26, 28), (28, 30), (28, 32),        # jambe droite
+    (11, 12),
+    (11, 23),
+    (12, 24),
+    (23, 24),  # torse
+    (11, 13),
+    (13, 15),  # bras gauche
+    (12, 14),
+    (14, 16),  # bras droit
+    (23, 25),
+    (25, 27),
+    (27, 29),
+    (27, 31),  # jambe gauche
+    (24, 26),
+    (26, 28),
+    (28, 30),
+    (28, 32),  # jambe droite
 ]
 
 # BGR — choisi pour être lisibles sur fond sombre ET clair
 _BONE = (160, 160, 160)
-_DOT  = ( 50, 220,  80)
+_DOT = (50, 220, 80)
 
 _C: dict[str, tuple[int, int, int]] = {
-    "inseam":  ( 50, 210,  70),   # vert
-    "femur":   (  0, 165, 255),   # orange
-    "tibia":   (255, 200,  50),   # bleu clair
-    "buste":   (100,  80, 255),   # rouge-violet
-    "circle":  (255, 200,  80),   # cyan-jaune (trajectoire cheville)
-    "bb":      ( 30, 170, 255),   # orange vif (BB)
-    "selle":   ( 50, 210,  70),   # vert
-    "guidon":  (100,  80, 255),   # rouge-violet
-    "reach":   (  0, 165, 255),   # orange
+    "inseam": (50, 210, 70),  # vert
+    "femur": (0, 165, 255),  # orange
+    "tibia": (255, 200, 50),  # bleu clair
+    "buste": (100, 80, 255),  # rouge-violet
+    "circle": (255, 200, 80),  # cyan-jaune (trajectoire cheville)
+    "bb": (30, 170, 255),  # orange vif (BB)
+    "selle": (50, 210, 70),  # vert
+    "guidon": (100, 80, 255),  # rouge-violet
+    "reach": (0, 165, 255),  # orange
 }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 class _LM:
     __slots__ = ("x", "y")
@@ -76,8 +88,9 @@ def _bracket(
     cv2.line(img, (bx - 6, p1[1]), (bx + 6, p1[1]), color, 2)
     cv2.line(img, (bx - 6, p2[1]), (bx + 6, p2[1]), color, 2)
     mid_y = (p1[1] + p2[1]) // 2
-    cv2.putText(img, label, (bx + 9, mid_y + 5),
-                cv2.FONT_HERSHEY_DUPLEX, 0.5, color, 1, cv2.LINE_AA)
+    cv2.putText(
+        img, label, (bx + 9, mid_y + 5), cv2.FONT_HERSHEY_DUPLEX, 0.5, color, 1, cv2.LINE_AA
+    )
 
 
 def _bracket_left(
@@ -97,11 +110,13 @@ def _bracket_left(
     mid_y = (p1[1] + p2[1]) // 2
     # texte à gauche du crochet
     (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_DUPLEX, 0.5, 1)
-    cv2.putText(img, label, (bx - tw - 9, mid_y + 5),
-                cv2.FONT_HERSHEY_DUPLEX, 0.5, color, 1, cv2.LINE_AA)
+    cv2.putText(
+        img, label, (bx - tw - 9, mid_y + 5), cv2.FONT_HERSHEY_DUPLEX, 0.5, color, 1, cv2.LINE_AA
+    )
 
 
 # ── API publique ──────────────────────────────────────────────────────────────
+
 
 def annotate_body_photo(
     photo_path: Path,
@@ -135,8 +150,9 @@ def annotate_body_photo(
     img_out = img.copy()
 
     if not result.pose_landmarks:
-        cv2.putText(img_out, "Aucune pose détectée", (30, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 220), 2)
+        cv2.putText(
+            img_out, "Aucune pose détectée", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 220), 2
+        )
         cv2.imwrite(str(output_path), img_out)
         return
 
@@ -145,27 +161,27 @@ def annotate_body_photo(
 
     _draw_skeleton(img_out, lm, w, h)
 
-    hip   = _avg(lm, 23, 24, w, h)
-    knee  = _avg(lm, 25, 26, w, h)
+    hip = _avg(lm, 23, 24, w, h)
+    knee = _avg(lm, 25, 26, w, h)
     ankle = _avg(lm, 27, 28, w, h)
     shldr = _avg(lm, 11, 12, w, h)
 
     if "entrejambe" in measurements:
-        _bracket(img_out, hip, ankle,
-                 f"Entrejambe  {measurements['entrejambe']} mm",
-                 _C["inseam"], 70, w)
+        _bracket(
+            img_out, hip, ankle, f"Entrejambe  {measurements['entrejambe']} mm", _C["inseam"], 70, w
+        )
     if "longueur_femur" in measurements:
-        _bracket(img_out, hip, knee,
-                 f"Femur  {measurements['longueur_femur']} mm",
-                 _C["femur"], 20, w)
+        _bracket(
+            img_out, hip, knee, f"Femur  {measurements['longueur_femur']} mm", _C["femur"], 20, w
+        )
     if "longueur_tibia" in measurements:
-        _bracket(img_out, knee, ankle,
-                 f"Tibia  {measurements['longueur_tibia']} mm",
-                 _C["tibia"], 20, w)
+        _bracket(
+            img_out, knee, ankle, f"Tibia  {measurements['longueur_tibia']} mm", _C["tibia"], 20, w
+        )
     if "longueur_buste" in measurements:
-        _bracket_left(img_out, hip, shldr,
-                      f"Buste  {measurements['longueur_buste']} mm",
-                      _C["buste"], 60)
+        _bracket_left(
+            img_out, hip, shldr, f"Buste  {measurements['longueur_buste']} mm", _C["buste"], 60
+        )
 
     cv2.imwrite(str(output_path), img_out)
 
@@ -223,17 +239,25 @@ def annotate_setup_frame(
         cv2.circle(img_out, pt, 3, _C["circle"], -1, cv2.LINE_AA)
 
     # ── Cercle ajusté (trajectoire cheville) + BB ─────────────────────────────
-    bb_px  = estimates.get("_bb_px")
-    r_mm   = estimates.get("_rayon_cheville_mm", 0)
-    r_px   = int(r_mm / mm_per_pixel) if mm_per_pixel > 0 else 0
+    bb_px = estimates.get("_bb_px")
+    r_mm = estimates.get("_rayon_cheville_mm", 0)
+    r_px = int(r_mm / mm_per_pixel) if mm_per_pixel > 0 else 0
 
     if bb_px is not None:
         bx, by = int(bb_px[0]), int(bb_px[1])
         if r_px > 0:
             cv2.circle(img_out, (bx, by), r_px, _C["circle"], 1, cv2.LINE_AA)
         cv2.drawMarker(img_out, (bx, by), _C["bb"], cv2.MARKER_CROSS, 24, 2, cv2.LINE_AA)
-        cv2.putText(img_out, "BB", (bx + 14, by - 10),
-                    cv2.FONT_HERSHEY_DUPLEX, 0.65, _C["bb"], 1, cv2.LINE_AA)
+        cv2.putText(
+            img_out,
+            "BB",
+            (bx + 14, by - 10),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.65,
+            _C["bb"],
+            1,
+            cv2.LINE_AA,
+        )
 
         # ── Lignes de mesure verticales / horizontales ────────────────────────
         def _vline(val_mm: float | None, x_shift: int, color: tuple, label: str) -> None:
@@ -245,12 +269,19 @@ def annotate_setup_frame(
             cv2.line(img_out, (x - 6, by), (x + 6, by), color, 2)
             cv2.line(img_out, (x - 6, top_y), (x + 6, top_y), color, 2)
             mid_y = (by + top_y) // 2
-            cv2.putText(img_out, f"{label}  {val_mm:.0f} mm",
-                        (x + 10, mid_y + 5), cv2.FONT_HERSHEY_DUPLEX,
-                        0.5, color, 1, cv2.LINE_AA)
+            cv2.putText(
+                img_out,
+                f"{label}  {val_mm:.0f} mm",
+                (x + 10, mid_y + 5),
+                cv2.FONT_HERSHEY_DUPLEX,
+                0.5,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
 
-        _vline(estimates.get("hauteur_selle_bb"),  0,   _C["selle"],  "Selle")
-        _vline(estimates.get("hauteur_guidon_bb"), 25,  _C["guidon"], "Guidon")
+        _vline(estimates.get("hauteur_selle_bb"), 0, _C["selle"], "Selle")
+        _vline(estimates.get("hauteur_guidon_bb"), 25, _C["guidon"], "Guidon")
 
         reach = estimates.get("reach_prolongateurs")
         if reach is not None:
@@ -258,8 +289,15 @@ def annotate_setup_frame(
             cv2.line(img_out, (bx, by + 10), (rx, by + 10), _C["reach"], 2, cv2.LINE_AA)
             cv2.line(img_out, (bx, by + 4), (bx, by + 16), _C["reach"], 2)
             cv2.line(img_out, (rx, by + 4), (rx, by + 16), _C["reach"], 2)
-            cv2.putText(img_out, f"Reach  {reach:.0f} mm",
-                        (bx + 10, by + 30), cv2.FONT_HERSHEY_DUPLEX,
-                        0.5, _C["reach"], 1, cv2.LINE_AA)
+            cv2.putText(
+                img_out,
+                f"Reach  {reach:.0f} mm",
+                (bx + 10, by + 30),
+                cv2.FONT_HERSHEY_DUPLEX,
+                0.5,
+                _C["reach"],
+                1,
+                cv2.LINE_AA,
+            )
 
     cv2.imwrite(str(output_path), img_out)

@@ -37,7 +37,7 @@ vidéo ──► [ingest] ──► [pose MediaPipe + cache Parquet] ──► [
 | Calibration | `calibration/` | Détecte un marqueur ArUco → `mm_per_pixel` (optionnel) |
 | Kinematics | `kinematics/` | Filtre SG, détection cycles, 5 angles vectorisés, agrégation |
 | Recommend | `recommend/` | Règles explicites : angles hors cible → delta mm par réglage |
-| Report | `report/` | Rapport HTML interactif (Plotly), 5 graphes d'angles, schéma SVG |
+| Report | `report/` | Rapport HTML interactif (Plotly), 5 graphes d'angles, schémas SVG profil + face |
 | Storage | `storage/` | Sessions SQLite : historique, comparaison avant/après |
 | Measure | `measure/` | Bootstrap des YAML personnels : mensurations (photo) et setup vélo (vidéo + ArUco) |
 
@@ -77,6 +77,8 @@ Options:
   --save-session       Sauvegarde la session dans ~/.bikefit/sessions.db
   --db PATH            Chemin alternatif pour la base SQLite
   --no-cache           Force le recalcul des landmarks MediaPipe
+  --front TEXT         Vidéo ou flux MJPEG (ex. ESP32-CAM) de la vue de face (Phase 3C)
+  --front-duration FLOAT  Durée de capture (s) si --front est un flux réseau (défaut: 15)
 ```
 
 ### `history` — liste les sessions
@@ -140,6 +142,24 @@ La calibration est stockée dans `FitMetrics.calibration` et sauvegardée avec l
 Elle permettra à terme de mesurer les réglages du vélo directement depuis la vidéo
 (hauteur de selle, reach, stack) sans mètre ruban.
 
+## Vue de face (Phase 3C, optionnelle)
+
+En plus de la vidéo de profil, `--front` accepte une seconde vidéo ou un flux MJPEG réseau
+(ex. ESP32-CAM — firmware et procédure de flash dans [`firmware/`](firmware/README.md)) pour calculer
+la déviation angulaire des genoux et la largeur des coudes (mm si calibration ArUco disponible).
+
+```bash
+# Vue de face depuis un fichier
+python -m bikefit video.mp4 --side right --front video_face.mp4
+
+# Vue de face depuis un flux MJPEG (ESP32-CAM), capture bornée à 30 s
+python -m bikefit video.mp4 --side right --front http://192.168.1.42/stream --front-duration 30
+```
+
+Les métriques apparaissent dans `FitMetrics` (`genou_deviation_gauche/droit`, `largeur_coudes`) et un
+schéma vélo vue de face s'ajoute au rapport HTML. ⚠️ Le firmware ESP32-CAM ne gère qu'un client à la
+fois : fermer tout onglet/lecteur déjà ouvert sur le flux avant de lancer la capture.
+
 ## Structure du projet
 
 ```
@@ -150,28 +170,32 @@ bikefit/
 │   └── rider/                   # mensurations personnelles (gitignorées)
 ├── docs/
 │   ├── plan-developpement.md
+│   ├── procedure-mesures.md     # procédure de prise de mesures + validation ruban
 │   └── aruco_marker_100mm.png   # marqueur à imprimer (100 mm, DICT_4X4_50 ID=0)
+├── firmware/
+│   ├── README.md                # installation/flash ESP32-CAM
+│   └── esp32cam_mjpeg/          # sketch Arduino, serveur MJPEG HTTP (vue de face)
 ├── models/                      # modèles MediaPipe .task (gitignorés)
 ├── cache/landmarks/             # cache Parquet par vidéo (gitignorés)
 ├── scripts/
 │   └── spike_bikefit.py         # script autonome Phase 0
 └── src/bikefit/
-    ├── ingest/                  # VideoReader, TimedFrame
+    ├── ingest/                  # VideoReader (fichier ou flux MJPEG réseau), TimedFrame
     ├── pose/                    # PoseEstimator (Protocol) + MediaPipe + LandmarkCache
-    ├── kinematics/              # filter, cycles, angles, aggregate, FitMetrics
+    ├── kinematics/              # filter, cycles, angles, aggregate, frontal (Phase 3C), FitMetrics
     ├── calibration/             # ArUco — detect_marker_size_px, calibrate_from_video
     ├── equipment/               # BikeProfile, BikeSetup, loader YAML
     ├── recommend/               # moteur de règles → FitReport + Recommendation
-    ├── report/                  # rapport HTML Jinja2 + Plotly (dark theme)
+    ├── report/                  # rapport HTML Jinja2 + Plotly (dark theme, schémas profil + face)
     ├── storage/                 # Session + SessionStore (SQLite)
-    ├── measure/                 # Bootstrap YAML : mensurations (photo) + setup vélo (vidéo/ArUco)
-    └── cli.py                   # Typer — analyze / history / compare / measure-body / measure-setup
+    ├── measure/                 # Bootstrap YAML : mensurations (photo) + setup vélo (vidéo/ArUco) + annotation visuelle
+    └── cli.py                   # Typer — analyze (--front) / history / compare / measure-body / measure-setup
 ```
 
 ## Tests
 
 ```bash
-python -m pytest        # 49 tests — angles, ArUco, recommandations, storage (données synthétiques)
+python -m pytest        # 65 tests — angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG (données synthétiques)
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
 ```
@@ -189,6 +213,7 @@ uv run ruff format --check src tests scripts
 - [x] Phase 2 — moteur de règles, fiche vélo, rapport HTML (coefficients empiriques)
 - [x] Phase 3A — calibration ArUco : `mm_per_pixel` détecté, stocké en session *(marqueur non encore imprimé)*
 - [x] Phase 3B — sessions SQLite : `history`, `compare`, `--save-session`
+- [x] `measure/` — bootstrap `measure-body`/`measure-setup` (mensurations + setup vélo, photo/vidéo annotée) *(pas de tests dédiés)*
 - [ ] Phase 3A+ — mesure automatique du vélo (BB → selle, reach, stack) via 2ᵉ marqueur ArUco
-- [ ] Phase 3C — vue de face (ESP32-CAM MJPEG) : alignement genoux, largeur coudes
+- [x] Phase 3C — vue de face (`--front`, fichier ou flux MJPEG ESP32-CAM) : déviation genoux, largeur coudes, firmware ESP32-CAM
 - [ ] Phase 4 — UI Streamlit (optionnel)
