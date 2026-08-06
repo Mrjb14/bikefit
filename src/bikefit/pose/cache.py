@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
 
 from bikefit._paths import CACHE_DIR
-from bikefit.ingest.reader import VideoReader
+from bikefit.ingest.reader import TimedFrame, VideoReader
 from bikefit.pose.base import FrameLandmarks, PoseEstimator
 
 
@@ -42,11 +43,16 @@ def compute_landmarks(
     estimator: PoseEstimator,
     progress: bool = True,
     max_duration_s: float | None = None,
+    on_frame: Callable[[TimedFrame, FrameLandmarks], None] | None = None,
 ) -> pd.DataFrame:
     """Calcule les landmarks pour chaque frame lue par `reader` (fichier ou flux réseau).
 
     max_duration_s borne la capture dans le temps — indispensable pour un flux
     réseau (ESP32-CAM) qui n'a pas de fin naturelle, ignoré pour un fichier local.
+
+    on_frame, si fourni, est appelé une fois par frame traitée avec la frame brute et
+    son résultat de pose — permet de brancher un hook (ex. écriture d'une vidéo de
+    debug) sans coupler ce module à un souci d'affichage/rendu (bikefit.debug.video).
     """
     if progress:
         print(f"Calcul des landmarks ({reader.frame_count or '?'} frames) ...")
@@ -56,6 +62,8 @@ def compute_landmarks(
             break
         fl = estimator.process(frame.frame_bgr, frame.timestamp_ms, frame.frame_idx)
         rows.append(_fl_to_dict(fl))
+        if on_frame is not None:
+            on_frame(frame, fl)
         if progress and frame.frame_idx % 100 == 0:
             print(f"  frame {frame.frame_idx}/{reader.frame_count or '?'}")
 

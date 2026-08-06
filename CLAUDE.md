@@ -30,9 +30,13 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
    attention aux signes dans les calculs d'angles.
 
 ## Architecture (src/bikefit/)
-- `ingest/` : `VideoReader` — fichier vidéo (OpenCV) ou flux réseau MJPEG (`http(s)://`/`rtsp://`,
-  ex. ESP32-CAM) via parsing manuel des marqueurs JPEG SOI/EOI, itérateur de frames horodatées
-  (`TimedFrame`). Flux réseau : timestamps sur horloge murale, pas de fps fiable côté source.
+- `ingest/` : `VideoReader` — fichier vidéo (OpenCV), flux réseau MJPEG (`http(s)://`/`rtsp://`,
+  ex. ESP32-CAM, via parsing manuel des marqueurs JPEG SOI/EOI) ou webcam locale (`webcam:<index>`,
+  ex. `webcam:0`, via `cv2.VideoCapture(index)`), itérateur de frames horodatées (`TimedFrame`).
+  Flux réseau et webcam (`is_live`) : timestamps sur horloge murale, pas de fps fiable côté source,
+  pas de fin naturelle → capture bornée dans le temps côté CLI (`--duration`/`--front-duration`).
+  `_same_source(a, b)` : compare deux sources (fichier résolu, ou chaîne exacte pour flux/webcam) —
+  utilisé par le CLI pour interdire de lancer les vues profil et face sur la même caméra.
 - `pose/` : protocole `PoseEstimator` + `MediaPipePoseEstimator` (Tasks API, `pose_landmarker_heavy`) + `LandmarkCache` (Parquet).
 - `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y),
   `compute_angles` (genou, hanche, tronc, coude, cheville — vectorisé NumPy), `aggregate_cycles` → `FitMetrics`.
@@ -61,6 +65,13 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   les estimations sont un point de départ (±5-10 % corps, ±20 mm setup), à valider au mètre ruban.
   `render.py` : annotation visuelle OpenCV (squelette + crochets de cotation) sur la photo/frame PMB,
   pour vérifier les estimations avant `--write`.
+- `debug/` : `DebugVideoWriter` — vidéo MP4 annotée (squelette `kinematics.landmarks.SKELETON_EDGES`
+  + HUD de métriques) pour debugger la détection, quelle que soit la source (fichier, flux, webcam).
+  Deux stratégies : `render_debug_video_from_landmarks` (fichier — rejoue le fichier une 2ᵉ fois,
+  décodage seul, superpose les angles lissés post-filtre, déjà ceux utilisés pour les recommandations)
+  et `render_debug_video_live` (flux/webcam — un flux ne se rejoue pas, écrit pendant l'unique passage
+  de capture via le hook `on_frame` de `pose.compute_landmarks`, angles bruts non lissés par frame).
+  CLI : `--debug-video`/`--front-debug-video` sur `analyze`.
 - `cli.py` : Typer — 5 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`.
   `__main__.py` injecte `analyze` si le premier argument n'est pas un sous-commande.
 
@@ -84,6 +95,12 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       `tests/test_frontal.py`, `test_aggregate_frontal.py`, `test_ingest.py`), schéma vélo face dans le
       rapport HTML, firmware ESP32-CAM (`firmware/`). Testé manuellement en direct (vidéo + flux réel),
       pas de jalon de précision chiffré pour l'instant (contrairement au ±2° de la Phase 1).
+- [x] Vue de profil en flux réseau/webcam (comme la vue de face) + garde anti-double-source
+      (`--front` ne peut pas pointer vers la même caméra/fichier que la vidéo de profil).
+- [x] `debug/` : vidéo de debug annotée (squelette + HUD d'angles) pour `analyze --debug-video` et
+      `--front-debug-video`, sur fichier (angles lissés, post-pipeline) ou flux/webcam (angles bruts,
+      écrits pendant la capture). Testé via un faux `PoseEstimator` (pas de MediaPipe dans les tests) :
+      `tests/test_debug_video.py`, `TestAnalyzeDebugVideo` dans `tests/test_cli.py`.
 - [ ] Phase 4 (option) : UI Streamlit.
 
 ## Commandes
@@ -91,7 +108,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (87 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG, report HTML, CLI)
+# Tests (115 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG/webcam,
+# report HTML, CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
 
 # Lint + format
@@ -107,6 +125,15 @@ python -m bikefit video.mp4 --side right --marker-size 100 --save-session
 # Pipeline avec vue de face (Phase 3C) — fichier ou flux MJPEG ESP32-CAM
 python -m bikefit video.mp4 --side right --front video_face.mp4
 python -m bikefit video.mp4 --side right --front http://192.168.1.42/stream --front-duration 60
+
+# Vue de profil et vue de face toutes les deux en webcam (deux périphériques distincts)
+python -m bikefit webcam:0 --side right --duration 60 --front webcam:1 --front-duration 60
+# webcam:0 des deux côtés -> rejeté (Erreur : --front pointe vers la même source ...)
+
+# Vidéo de debug (squelette + angles superposés) — fichier, flux ou webcam indifféremment
+python -m bikefit video.mp4 --side right --debug-video debug.mp4
+python -m bikefit webcam:0 --side right --duration 30 --debug-video debug_live.mp4
+python -m bikefit video.mp4 --side right --front webcam:0 --front-debug-video debug_face.mp4
 
 # Historique des sessions
 python -m bikefit history
@@ -148,7 +175,9 @@ Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR
 - ESP32-CAM (basse résolution ~15-25 fps) — vue de face (Phase 3C), flux MJPEG HTTP, `--front`.
   Firmware et doc de flash dans `firmware/`. Limite matérielle : un seul client HTTP à la fois
   (`WiFiServer` basique côté firmware) — fermer tout autre lecteur du flux avant de lancer une capture.
-- Le module ingest accepte fichier vidéo ET flux réseau MJPEG (`http(s)://`/`rtsp://`).
+- Le module ingest accepte fichier vidéo, flux réseau MJPEG (`http(s)://`/`rtsp://`) ET webcam locale
+  (`webcam:<index>`) — vue de profil et vue de face acceptent les trois indifféremment, avec une
+  vérification au lancement qu'elles ne pointent pas vers la même source.
 - Vidéos non versionnées (trop volumineuses) — dans `data/`, gitignorées.
 - Marqueur ArUco : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal côté caméra.
   Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.

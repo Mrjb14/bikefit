@@ -32,7 +32,7 @@ vidéo ──► [ingest] ──► [pose MediaPipe + cache Parquet] ──► [
 
 | Étape | Module | Description |
 |---|---|---|
-| Ingest | `ingest/` | Lit la vidéo (OpenCV), produit des frames horodatées |
+| Ingest | `ingest/` | Lit un fichier, un flux MJPEG réseau ou une webcam locale, produit des frames horodatées |
 | Pose | `pose/` | MediaPipe `pose_landmarker_heavy` (Tasks API), cache Parquet |
 | Calibration | `calibration/` | Détecte un marqueur ArUco → `mm_per_pixel` (optionnel) |
 | Kinematics | `kinematics/` | Filtre SG, détection cycles, 5 angles vectorisés, agrégation |
@@ -40,6 +40,7 @@ vidéo ──► [ingest] ──► [pose MediaPipe + cache Parquet] ──► [
 | Report | `report/` | Rapport HTML interactif (Plotly), 5 graphes d'angles, schémas SVG profil + face |
 | Storage | `storage/` | Sessions SQLite : historique, comparaison avant/après |
 | Measure | `measure/` | Bootstrap des YAML personnels : mensurations (photo) et setup vélo (vidéo + ArUco) |
+| Debug | `debug/` | Vidéo MP4 annotée (squelette + angles) pour debugger la détection, toute source confondue |
 
 ## Métriques calculées
 
@@ -67,19 +68,28 @@ vidéo ──► [ingest] ──► [pose MediaPipe + cache Parquet] ──► [
 python -m bikefit VIDEO [OPTIONS]
 python -m bikefit analyze VIDEO [OPTIONS]
 
+VIDEO : fichier (mp4/mov), flux MJPEG (http://... ou rtsp://...) ou webcam locale (webcam:0)
+
 Options:
   --side TEXT          right | left — côté filmé (défaut: right)
+  --duration FLOAT     Durée de capture (s) si VIDEO est un flux réseau ou une webcam (défaut: 15)
   --bike TEXT          Fiche vélo dans config/bikes/ (défaut: giant_trinity_2019)
   --profile TEXT       triathlon_XL | clm_long | clm_court (défaut: triathlon_XL)
   --report PATH        Rapport HTML de sortie
   --output PATH        Métriques JSON de sortie
   --marker-size FLOAT  Taille du marqueur ArUco en mm (ex. 100) — active la calibration
+                       (fichier vidéo uniquement, pas de flux/webcam)
   --save-session       Sauvegarde la session dans ~/.bikefit/sessions.db
   --db PATH            Chemin alternatif pour la base SQLite
-  --no-cache           Force le recalcul des landmarks MediaPipe
-  --front TEXT         Vidéo ou flux MJPEG (ex. ESP32-CAM) de la vue de face (Phase 3C)
-  --front-duration FLOAT  Durée de capture (s) si --front est un flux réseau (défaut: 15)
+  --no-cache           Force le recalcul des landmarks MediaPipe (fichier uniquement)
+  --front TEXT         Vidéo, flux MJPEG ou webcam (webcam:0) de la vue de face (Phase 3C)
+  --front-duration FLOAT  Durée de capture (s) si --front est un flux réseau ou une webcam (défaut: 15)
+  --debug-video PATH   Vidéo de debug (squelette + angles superposés), vue de profil
+  --front-debug-video PATH  Vidéo de debug (squelette + métriques superposés), vue de face
 ```
+
+`VIDEO` et `--front` ne peuvent pas pointer vers la même source (même fichier, même flux, même
+index webcam) — la commande refuse de lancer les deux vues sur la même caméra.
 
 ### `history` — liste les sessions
 
@@ -142,23 +152,69 @@ La calibration est stockée dans `FitMetrics.calibration` et sauvegardée avec l
 Elle permettra à terme de mesurer les réglages du vélo directement depuis la vidéo
 (hauteur de selle, reach, stack) sans mètre ruban.
 
-## Vue de face (Phase 3C, optionnelle)
+## Sources vidéo : fichier, flux réseau ou webcam
 
-En plus de la vidéo de profil, `--front` accepte une seconde vidéo ou un flux MJPEG réseau
-(ex. ESP32-CAM — firmware et procédure de flash dans [`firmware/`](firmware/README.md)) pour calculer
-la déviation angulaire des genoux et la largeur des coudes (mm si calibration ArUco disponible).
+`VIDEO` (vue de profil) et `--front` (vue de face, Phase 3C) acceptent chacun indifféremment :
+
+- un **fichier** (mp4/mov) ;
+- un **flux MJPEG réseau** (`http://...`, `https://...`, `rtsp://...` — ex. ESP32-CAM, firmware et
+  procédure de flash dans [`firmware/`](firmware/README.md)) ;
+- une **webcam locale** (`webcam:<index>`, ex. `webcam:0` pour la première webcam détectée par OpenCV).
+
+Flux réseau et webcam n'ont pas de fin naturelle : la capture est bornée par `--duration`/
+`--front-duration` (15 s par défaut). Un fichier vidéo se termine de lui-même, cache Parquet inclus ;
+un flux/webcam n'est jamais mis en cache (rejoué à chaque lancement).
 
 ```bash
-# Vue de face depuis un fichier
-python -m bikefit video.mp4 --side right --front video_face.mp4
+# Vue de profil en fichier, vue de face en webcam
+python -m bikefit video.mp4 --side right --front webcam:0 --front-duration 30
+
+# Les deux vues en webcam (deux périphériques distincts obligatoires)
+python -m bikefit webcam:0 --side right --duration 60 --front webcam:1 --front-duration 60
 
 # Vue de face depuis un flux MJPEG (ESP32-CAM), capture bornée à 30 s
 python -m bikefit video.mp4 --side right --front http://192.168.1.42/stream --front-duration 30
 ```
 
-Les métriques apparaissent dans `FitMetrics` (`genou_deviation_gauche/droit`, `largeur_coudes`) et un
-schéma vélo vue de face s'ajoute au rapport HTML. ⚠️ Le firmware ESP32-CAM ne gère qu'un client à la
-fois : fermer tout onglet/lecteur déjà ouvert sur le flux avant de lancer la capture.
+`VIDEO` et `--front` ne peuvent pas être la même source — `webcam:0` des deux côtés (ou le même
+fichier, ou la même URL) est rejeté au lancement, avant toute ouverture de caméra :
+
+```
+Erreur : --front pointe vers la même source que la vidéo de profil (fichier, flux ou webcam) —
+impossible de lancer les deux vues sur la même caméra.
+```
+
+Pour la vue de face, les métriques apparaissent dans `FitMetrics` (`genou_deviation_gauche/droit`,
+`largeur_coudes`) et un schéma vélo vue de face s'ajoute au rapport HTML. ⚠️ Le firmware ESP32-CAM ne
+gère qu'un client à la fois : fermer tout onglet/lecteur déjà ouvert sur le flux avant de lancer la
+capture. La calibration ArUco (`--marker-size`) n'est disponible que sur fichier vidéo.
+
+## Vidéo de debug
+
+`--debug-video`/`--front-debug-video` génèrent une vidéo MP4 avec le squelette détecté et les angles
+superposés (HUD en incrustation), pour vérifier visuellement ce que le pipeline détecte réellement —
+utile quand les métriques semblent aberrantes ou que le taux de détection est faible. Fonctionne avec
+n'importe quelle source (fichier, flux réseau, webcam).
+
+```bash
+# Fichier — rejoue la vidéo (décodage seul, sans MediaPipe) avec les angles lissés finaux
+python -m bikefit video.mp4 --side right --debug-video debug.mp4
+
+# Webcam en direct — écrit pendant la capture, angles bruts par frame (pas de lissage possible)
+python -m bikefit webcam:0 --side right --duration 30 --debug-video debug_live.mp4
+
+# Vue de face
+python -m bikefit video.mp4 --side right --front webcam:0 --front-debug-video debug_face.mp4
+```
+
+Deux comportements selon la source, documentés pour éviter toute confusion :
+
+- **Fichier** : la vidéo de debug superpose les angles **lissés** (post-filtre Savitzky-Golay) — les
+  valeurs exactes utilisées pour les recommandations. Rejeu léger (décodage seul, sans MediaPipe), donc
+  rapide même quand les landmarks viennent du cache.
+- **Flux réseau / webcam** : un flux live ne se rejoue pas. Le squelette et les angles affichés sont
+  calculés **frame par frame, bruts** (sans lissage, qui nécessite l'ensemble de la capture) — normal
+  de les voir plus "nerveux" que sur un rapport final.
 
 ## Structure du projet
 
@@ -180,7 +236,7 @@ bikefit/
 ├── scripts/
 │   └── spike_bikefit.py         # script autonome Phase 0
 └── src/bikefit/
-    ├── ingest/                  # VideoReader (fichier ou flux MJPEG réseau), TimedFrame
+    ├── ingest/                  # VideoReader (fichier, flux MJPEG réseau ou webcam), TimedFrame
     ├── pose/                    # PoseEstimator (Protocol) + MediaPipe + LandmarkCache
     ├── kinematics/              # filter, cycles, angles, aggregate, frontal (Phase 3C), FitMetrics
     ├── calibration/             # ArUco — detect_marker_size_px, calibrate_from_video
@@ -189,13 +245,15 @@ bikefit/
     ├── report/                  # rapport HTML Jinja2 + Plotly (dark theme, schémas profil + face)
     ├── storage/                 # Session + SessionStore (SQLite)
     ├── measure/                 # Bootstrap YAML : mensurations (photo) + setup vélo (vidéo/ArUco) + annotation visuelle
-    └── cli.py                   # Typer — analyze (--front) / history / compare / measure-body / measure-setup
+    ├── debug/                   # Vidéo de debug annotée (squelette + HUD d'angles), toute source
+    └── cli.py                   # Typer — analyze (--front, --debug-video) / history / compare / measure-*
 ```
 
 ## Tests
 
 ```bash
-python -m pytest        # 87 tests — angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG, report HTML, CLI (données synthétiques)
+python -m pytest        # 115 tests — angles, ArUco, recommandations, storage, plan frontal,
+                         # ingest MJPEG/webcam, report HTML, CLI, vidéo de debug (données synthétiques)
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
 ```
@@ -216,4 +274,6 @@ uv run ruff format --check src tests scripts
 - [x] `measure/` — bootstrap `measure-body`/`measure-setup` (mensurations + setup vélo, photo/vidéo annotée) *(pas de tests dédiés)*
 - [ ] Phase 3A+ — mesure automatique du vélo (BB → selle, reach, stack) via 2ᵉ marqueur ArUco
 - [x] Phase 3C — vue de face (`--front`, fichier ou flux MJPEG ESP32-CAM) : déviation genoux, largeur coudes, firmware ESP32-CAM
+- [x] Vue de profil en flux réseau/webcam (symétrique à `--front`) + garde anti-double-source
+- [x] Vidéo de debug (`--debug-video`/`--front-debug-video`) : squelette + angles superposés, toute source
 - [ ] Phase 4 — UI Streamlit (optionnel)
