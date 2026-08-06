@@ -24,6 +24,20 @@ _ANGLE_LABELS = {
     "cheville_pmb": "Cheville PMB",
 }
 
+# ── Colonnes affichées dans le HUD des vidéos de debug (colonne, libellé, unité) ─
+_SIDE_HUD_COLUMNS: list[tuple[str, str, str]] = [
+    ("genou", "Genou", "°"),
+    ("hanche", "Hanche", "°"),
+    ("tronc", "Tronc", "°"),
+    ("coude", "Coude", "°"),
+    ("cheville", "Cheville", "°"),
+]
+_FRONT_HUD_COLUMNS: list[tuple[str, str, str]] = [
+    ("genou_deviation_gauche", "Dev. genou G", "°"),
+    ("genou_deviation_droit", "Dev. genou D", "°"),
+    ("largeur_coudes_px", "Largeur coudes", "px"),
+]
+
 
 @app.command()
 def analyze(
@@ -47,6 +61,14 @@ def analyze(
         float,
         typer.Option(help="Durée de capture (s) si --front est un flux réseau ou une webcam"),
     ] = 15.0,
+    debug_video: Annotated[
+        Path | None,
+        typer.Option(help="Vidéo de debug (squelette + angles superposés) pour la vue de profil"),
+    ] = None,
+    front_debug_video: Annotated[
+        Path | None,
+        typer.Option(help="Vidéo de debug (squelette + métriques superposés) pour la vue de face"),
+    ] = None,
     bike: Annotated[str, typer.Option(help="Fiche vélo dans config/bikes/")] = "giant_trinity_2019",
     side: Annotated[str, typer.Option(help="right | left — côté filmé")] = "right",
     profile: Annotated[
@@ -115,7 +137,25 @@ def analyze(
     with MediaPipePoseEstimator() as estimator:
         if video_is_live:
             typer.echo(f"Capture {duration:.0f}s...")
-            df = compute_landmarks(reader, estimator, max_duration_s=duration)
+            if debug_video is not None:
+                from functools import partial
+
+                from bikefit.debug import render_debug_video_live
+
+                metrics_fn = partial(
+                    compute_angles, side=side, width=reader.width, height=reader.height
+                )
+                df = render_debug_video_live(
+                    reader,
+                    estimator,
+                    metrics_fn,
+                    _SIDE_HUD_COLUMNS,
+                    debug_video,
+                    max_duration_s=duration,
+                )
+                typer.echo(f"Vidéo de debug -> {debug_video}")
+            else:
+                df = compute_landmarks(reader, estimator, max_duration_s=duration)
         else:
             if no_cache:
                 from bikefit.pose.cache import _video_key
@@ -139,6 +179,16 @@ def analyze(
 
     if len(cycles) < 3:
         typer.echo("Avertissement : moins de 3 cycles — résultats peu fiables.", err=True)
+
+    # ── Vidéo de debug (fichier : rejoue le fichier avec les angles lissés) ──
+    if debug_video is not None and not video_is_live:
+        from bikefit.debug import render_debug_video_from_landmarks
+
+        typer.echo("Génération de la vidéo de debug...")
+        render_debug_video_from_landmarks(
+            video_path, df_filtered, angle_df, _SIDE_HUD_COLUMNS, debug_video
+        )
+        typer.echo(f"Vidéo de debug -> {debug_video}")
 
     metrics = aggregate_cycles(angle_df, cycles)
 
@@ -183,9 +233,29 @@ def analyze(
         with MediaPipePoseEstimator() as front_estimator:
             if front_reader.is_live:
                 typer.echo(f"  Capture {front_duration:.0f}s...")
-                front_df = compute_landmarks(
-                    front_reader, front_estimator, max_duration_s=front_duration
-                )
+                if front_debug_video is not None:
+                    from functools import partial
+
+                    from bikefit.debug import render_debug_video_live
+
+                    front_metrics_fn = partial(
+                        compute_frontal_metrics,
+                        width=front_reader.width,
+                        height=front_reader.height,
+                    )
+                    front_df = render_debug_video_live(
+                        front_reader,
+                        front_estimator,
+                        front_metrics_fn,
+                        _FRONT_HUD_COLUMNS,
+                        front_debug_video,
+                        max_duration_s=front_duration,
+                    )
+                    typer.echo(f"  Vidéo de debug -> {front_debug_video}")
+                else:
+                    front_df = compute_landmarks(
+                        front_reader, front_estimator, max_duration_s=front_duration
+                    )
             else:
                 front_cache = LandmarkCache(CACHE_DIR / "landmarks")
                 front_df = front_cache.get_or_compute(Path(front), front_reader, front_estimator)
@@ -197,6 +267,16 @@ def analyze(
         frontal_df = compute_frontal_metrics(
             front_filtered, front_reader.width, front_reader.height
         )
+
+        if front_debug_video is not None and not front_reader.is_live:
+            from bikefit.debug import render_debug_video_from_landmarks
+
+            typer.echo("  Génération de la vidéo de debug (vue de face)...")
+            render_debug_video_from_landmarks(
+                Path(front), front_filtered, frontal_df, _FRONT_HUD_COLUMNS, front_debug_video
+            )
+            typer.echo(f"  Vidéo de debug -> {front_debug_video}")
+
         front_cycles = detect_cycles(front_filtered, "right", front_reader.fps)
         typer.echo(f"  Cycles détectés : {len(front_cycles)}")
 

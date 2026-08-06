@@ -1,24 +1,62 @@
 """Tests du CLI (Typer) — commandes qui ne nécessitent pas le pipeline vidéo/pose.
 
-`analyze`/`measure-body`/`measure-setup` dépendent de MediaPipe + une vidéo réelle et ne
-sont pas couverts ici au-delà de leur validation d'arguments précoce (avant tout traitement
-lourd). `history` et `compare` sont testés de bout en bout (vrai SQLite, sans mock).
+`analyze` dépend de MediaPipe + une vidéo réelle et n'est couvert ici au-delà de sa
+validation d'arguments précoce qu'en remplaçant MediaPipePoseEstimator par un faux
+estimateur (TestAnalyzeDebugVideo) — `measure-body`/`measure-setup` restent hors
+scope. `history` et `compare` sont testés de bout en bout (vrai SQLite, sans mock).
 """
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from pathlib import Path
 
+import cv2
+import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from bikefit.cli import app
 from bikefit.equipment.models import BikeModel, BikeProfile, BikeSetup
 from bikefit.kinematics.metrics import AngleStats, FitMetrics
+from bikefit.pose.base import FrameLandmarks, Landmark
 from bikefit.recommend import recommend
 from bikefit.storage import Session, SessionStore
 
 runner = CliRunner()
+
+
+class _FakeCliPoseEstimator:
+    """Remplace MediaPipePoseEstimator dans les tests CLI — même squelette rigide
+    translaté verticalement en sinusoïde (fait osciller ankle_y -> cycles détectables),
+    sans dépendance MediaPipe."""
+
+    def __enter__(self) -> _FakeCliPoseEstimator:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def process(self, frame_bgr: np.ndarray, timestamp_ms: int, frame_idx: int) -> FrameLandmarks:
+        shift = 0.05 * math.sin(2 * math.pi * frame_idx / 5)
+        landmarks = [
+            Landmark(x=0.1 + 0.02 * i, y=0.3 + 0.017 * i + shift, z=0.0, visibility=1.0)
+            for i in range(33)
+        ]
+        return FrameLandmarks(
+            timestamp_ms=timestamp_ms, frame_idx=frame_idx, detected=True, landmarks=landmarks
+        )
+
+
+def _write_synthetic_video(
+    path: Path, n_frames: int = 20, width: int = 64, height: int = 48
+) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (width, height))
+    for _ in range(n_frames):
+        writer.write(np.zeros((height, width, 3), dtype=np.uint8))
+    writer.release()
+
 
 # ── Helpers (mêmes que test_storage.py) ────────────────────────────────────────
 
@@ -99,6 +137,53 @@ class TestAnalyzeValidation:
         result = runner.invoke(app, ["analyze", str(video), "--front", str(front)])
         # Fichiers bidon -> échoue plus loin (vidéo illisible), mais pas sur la garde.
         assert "même source" not in result.output.lower()
+
+
+# ── analyze --debug-video : pipeline complet, MediaPipe remplacé par un faux ───
+
+
+class TestAnalyzeDebugVideo:
+    def test_debug_video_generated_for_file_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        video_path = tmp_path / "video.mp4"
+        _write_synthetic_video(video_path)
+
+        monkeypatch.setattr("bikefit.pose.MediaPipePoseEstimator", _FakeCliPoseEstimator)
+        monkeypatch.setattr("bikefit.pose.cache.CACHE_DIR", tmp_path / "cache")
+
+        debug_out = tmp_path / "debug.mp4"
+        report_out = tmp_path / "report.html"
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                str(video_path),
+                "--side",
+                "right",
+                "--debug-video",
+                str(debug_out),
+                "--report",
+                str(report_out),
+                "--bike",
+                "velo_de_test_inexistant",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert debug_out.exists()
+        assert debug_out.stat().st_size > 0
+        assert report_out.exists()
+
+        cap = cv2.VideoCapture(str(debug_out))
+        count = 0
+        while True:
+            ok, _ = cap.read()
+            if not ok:
+                break
+            count += 1
+        cap.release()
+        assert count == 20  # une frame de sortie par frame source
 
 
 # ── history ──────────────────────────────────────────────────────────────────

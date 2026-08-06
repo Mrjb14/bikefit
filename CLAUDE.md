@@ -65,6 +65,13 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   les estimations sont un point de départ (±5-10 % corps, ±20 mm setup), à valider au mètre ruban.
   `render.py` : annotation visuelle OpenCV (squelette + crochets de cotation) sur la photo/frame PMB,
   pour vérifier les estimations avant `--write`.
+- `debug/` : `DebugVideoWriter` — vidéo MP4 annotée (squelette `kinematics.landmarks.SKELETON_EDGES`
+  + HUD de métriques) pour debugger la détection, quelle que soit la source (fichier, flux, webcam).
+  Deux stratégies : `render_debug_video_from_landmarks` (fichier — rejoue le fichier une 2ᵉ fois,
+  décodage seul, superpose les angles lissés post-filtre, déjà ceux utilisés pour les recommandations)
+  et `render_debug_video_live` (flux/webcam — un flux ne se rejoue pas, écrit pendant l'unique passage
+  de capture via le hook `on_frame` de `pose.compute_landmarks`, angles bruts non lissés par frame).
+  CLI : `--debug-video`/`--front-debug-video` sur `analyze`.
 - `cli.py` : Typer — 5 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`.
   `__main__.py` injecte `analyze` si le premier argument n'est pas un sous-commande.
 
@@ -88,6 +95,12 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       `tests/test_frontal.py`, `test_aggregate_frontal.py`, `test_ingest.py`), schéma vélo face dans le
       rapport HTML, firmware ESP32-CAM (`firmware/`). Testé manuellement en direct (vidéo + flux réel),
       pas de jalon de précision chiffré pour l'instant (contrairement au ±2° de la Phase 1).
+- [x] Vue de profil en flux réseau/webcam (comme la vue de face) + garde anti-double-source
+      (`--front` ne peut pas pointer vers la même caméra/fichier que la vidéo de profil).
+- [x] `debug/` : vidéo de debug annotée (squelette + HUD d'angles) pour `analyze --debug-video` et
+      `--front-debug-video`, sur fichier (angles lissés, post-pipeline) ou flux/webcam (angles bruts,
+      écrits pendant la capture). Testé via un faux `PoseEstimator` (pas de MediaPipe dans les tests) :
+      `tests/test_debug_video.py`, `TestAnalyzeDebugVideo` dans `tests/test_cli.py`.
 - [ ] Phase 4 (option) : UI Streamlit.
 
 ## Commandes
@@ -95,7 +108,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (103 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG/webcam, report HTML, CLI)
+# Tests (115 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG/webcam,
+# report HTML, CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
 
 # Lint + format
@@ -115,6 +129,11 @@ python -m bikefit video.mp4 --side right --front http://192.168.1.42/stream --fr
 # Vue de profil et vue de face toutes les deux en webcam (deux périphériques distincts)
 python -m bikefit webcam:0 --side right --duration 60 --front webcam:1 --front-duration 60
 # webcam:0 des deux côtés -> rejeté (Erreur : --front pointe vers la même source ...)
+
+# Vidéo de debug (squelette + angles superposés) — fichier, flux ou webcam indifféremment
+python -m bikefit video.mp4 --side right --debug-video debug.mp4
+python -m bikefit webcam:0 --side right --duration 30 --debug-video debug_live.mp4
+python -m bikefit video.mp4 --side right --front webcam:0 --front-debug-video debug_face.mp4
 
 # Historique des sessions
 python -m bikefit history

@@ -40,6 +40,7 @@ vidéo ──► [ingest] ──► [pose MediaPipe + cache Parquet] ──► [
 | Report | `report/` | Rapport HTML interactif (Plotly), 5 graphes d'angles, schémas SVG profil + face |
 | Storage | `storage/` | Sessions SQLite : historique, comparaison avant/après |
 | Measure | `measure/` | Bootstrap des YAML personnels : mensurations (photo) et setup vélo (vidéo + ArUco) |
+| Debug | `debug/` | Vidéo MP4 annotée (squelette + angles) pour debugger la détection, toute source confondue |
 
 ## Métriques calculées
 
@@ -83,6 +84,8 @@ Options:
   --no-cache           Force le recalcul des landmarks MediaPipe (fichier uniquement)
   --front TEXT         Vidéo, flux MJPEG ou webcam (webcam:0) de la vue de face (Phase 3C)
   --front-duration FLOAT  Durée de capture (s) si --front est un flux réseau ou une webcam (défaut: 15)
+  --debug-video PATH   Vidéo de debug (squelette + angles superposés), vue de profil
+  --front-debug-video PATH  Vidéo de debug (squelette + métriques superposés), vue de face
 ```
 
 `VIDEO` et `--front` ne peuvent pas pointer vers la même source (même fichier, même flux, même
@@ -186,6 +189,33 @@ Pour la vue de face, les métriques apparaissent dans `FitMetrics` (`genou_devia
 gère qu'un client à la fois : fermer tout onglet/lecteur déjà ouvert sur le flux avant de lancer la
 capture. La calibration ArUco (`--marker-size`) n'est disponible que sur fichier vidéo.
 
+## Vidéo de debug
+
+`--debug-video`/`--front-debug-video` génèrent une vidéo MP4 avec le squelette détecté et les angles
+superposés (HUD en incrustation), pour vérifier visuellement ce que le pipeline détecte réellement —
+utile quand les métriques semblent aberrantes ou que le taux de détection est faible. Fonctionne avec
+n'importe quelle source (fichier, flux réseau, webcam).
+
+```bash
+# Fichier — rejoue la vidéo (décodage seul, sans MediaPipe) avec les angles lissés finaux
+python -m bikefit video.mp4 --side right --debug-video debug.mp4
+
+# Webcam en direct — écrit pendant la capture, angles bruts par frame (pas de lissage possible)
+python -m bikefit webcam:0 --side right --duration 30 --debug-video debug_live.mp4
+
+# Vue de face
+python -m bikefit video.mp4 --side right --front webcam:0 --front-debug-video debug_face.mp4
+```
+
+Deux comportements selon la source, documentés pour éviter toute confusion :
+
+- **Fichier** : la vidéo de debug superpose les angles **lissés** (post-filtre Savitzky-Golay) — les
+  valeurs exactes utilisées pour les recommandations. Rejeu léger (décodage seul, sans MediaPipe), donc
+  rapide même quand les landmarks viennent du cache.
+- **Flux réseau / webcam** : un flux live ne se rejoue pas. Le squelette et les angles affichés sont
+  calculés **frame par frame, bruts** (sans lissage, qui nécessite l'ensemble de la capture) — normal
+  de les voir plus "nerveux" que sur un rapport final.
+
 ## Structure du projet
 
 ```
@@ -215,13 +245,15 @@ bikefit/
     ├── report/                  # rapport HTML Jinja2 + Plotly (dark theme, schémas profil + face)
     ├── storage/                 # Session + SessionStore (SQLite)
     ├── measure/                 # Bootstrap YAML : mensurations (photo) + setup vélo (vidéo/ArUco) + annotation visuelle
-    └── cli.py                   # Typer — analyze (--front) / history / compare / measure-body / measure-setup
+    ├── debug/                   # Vidéo de debug annotée (squelette + HUD d'angles), toute source
+    └── cli.py                   # Typer — analyze (--front, --debug-video) / history / compare / measure-*
 ```
 
 ## Tests
 
 ```bash
-python -m pytest        # 103 tests — angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG/webcam, report HTML, CLI (données synthétiques)
+python -m pytest        # 115 tests — angles, ArUco, recommandations, storage, plan frontal,
+                         # ingest MJPEG/webcam, report HTML, CLI, vidéo de debug (données synthétiques)
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
 ```
@@ -242,4 +274,6 @@ uv run ruff format --check src tests scripts
 - [x] `measure/` — bootstrap `measure-body`/`measure-setup` (mensurations + setup vélo, photo/vidéo annotée) *(pas de tests dédiés)*
 - [ ] Phase 3A+ — mesure automatique du vélo (BB → selle, reach, stack) via 2ᵉ marqueur ArUco
 - [x] Phase 3C — vue de face (`--front`, fichier ou flux MJPEG ESP32-CAM) : déviation genoux, largeur coudes, firmware ESP32-CAM
+- [x] Vue de profil en flux réseau/webcam (symétrique à `--front`) + garde anti-double-source
+- [x] Vidéo de debug (`--debug-video`/`--front-debug-video`) : squelette + angles superposés, toute source
 - [ ] Phase 4 — UI Streamlit (optionnel)
