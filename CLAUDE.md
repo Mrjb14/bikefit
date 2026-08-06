@@ -8,6 +8,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 
 ## Documents de référence
 - `docs/plan-developpement.md` : plan complet, architecture, phases — **à lire en premier**.
+- `docs/procedure-mesures.md` : procédure de prise de mesures (corps + setup vélo), bootstrap automatique
+  (`measure-body`/`measure-setup`) puis validation obligatoire au mètre ruban.
 - `config/bikes/giant_trinity_2019.yaml` : fiche du vélo cible (Giant Trinity Advanced Pro 2, 2019, M).
 - `config/rider/mensurations.yaml` : mensurations personnelles + objectif (Ironman 2027-05-21).
 - `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, Tasks API MediaPipe v1.0).
@@ -43,7 +45,14 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   Dark theme, 5 graphes d'angles empilés, schéma SVG du vélo avec annotations colorées.
 - `storage/` : `Session` (Pydantic) + `SessionStore` (SQLite natif `sqlite3`).
   Opérations : `save`, `get`, `list_all`, `latest`, `delete`. Tri par `date DESC, id DESC`.
-- `cli.py` : Typer — 3 commandes : `analyze` (défaut), `history`, `compare`.
+- `measure/` : bootstrap des YAML personnels (`config/rider/`, `config/bikes/`) depuis photo/vidéo.
+  `estimate_body_measurements` (photo debout, MediaPipe IMAGE mode, world_landmarks 3D, mise à l'échelle
+  via ratio nez→cheville / taille) ; `estimate_bike_setup` (vidéo + calibration ArUco, fit de cercle de
+  Kåsa sur la trajectoire de la cheville → centre BB, puis `hauteur_selle_bb`/`hauteur_guidon_bb`/
+  `reach_prolongateurs` par projection sur BB) ; `update_null_fields` (yaml_io) réécrit uniquement les
+  champs `null` d'un YAML existant, commentaires préservés. N'écrit jamais un champ déjà renseigné —
+  les estimations sont un point de départ (±5-10 % corps, ±20 mm setup), à valider au mètre ruban.
+- `cli.py` : Typer — 5 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`.
   `__main__.py` injecte `analyze` si le premier argument n'est pas un sous-commande.
 
 ## État d'avancement
@@ -55,6 +64,10 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - [x] Phase 3A : `calibration/` — détection ArUco → `mm_per_pixel`, stocké dans `FitMetrics` + session.
       **Marqueur non encore imprimé** — pipeline complet mais non testé sur vidéo réelle avec marqueur.
 - [x] Phase 3B : `storage/` — sessions SQLite, CLI `history` + `compare`, `--save-session`.
+- [x] `measure/` : bootstrap mensurations (`measure-body`) et setup vélo (`measure-setup`) — écrit les
+      champs `null` de `config/rider/*.yaml` et `config/bikes/*.yaml`. **Pas encore de tests dédiés**
+      (`tests/` ne couvre pas `measure/`) — précision non validée face au mètre ruban (voir
+      `docs/procedure-mesures.md`, critère de succès Phase 3A+ : ArUco ≈ ruban à ± 5 mm).
 - [ ] Phase 3A+ : 2ᵉ marqueur ArUco sur le BB → mesure automatique hauteur selle, reach, stack depuis la vidéo.
 - [ ] Phase 3C : vue de face (ESP32-CAM MJPEG), alignement genoux/largeur coudes.
 - [ ] Phase 4 (option) : UI Streamlit.
@@ -82,6 +95,12 @@ python -m bikefit history
 
 # Comparer deux sessions
 python -m bikefit compare 1 2
+
+# Bootstrap mensurations depuis une photo debout
+python -m bikefit measure-body photo.jpg --write
+
+# Bootstrap setup vélo depuis une vidéo (marqueur ArUco requis)
+python -m bikefit measure-setup video.mp4 --marker-size 100 --write
 
 # Spike Phase 0
 python scripts/spike_bikefit.py video.mp4 --side right
