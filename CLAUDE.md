@@ -91,7 +91,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (65 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG)
+# Tests (87 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG, report HTML, CLI)
 python -m pytest
 
 # Lint + format

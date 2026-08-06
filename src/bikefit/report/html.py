@@ -105,7 +105,7 @@ def render(
     bike: BikeProfile | None = None,
 ) -> None:
     """Génère le fichier HTML complet."""
-    env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape=False)
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape=True)
     tmpl = env.get_template(_TEMPLATE_NAME)
 
     html = tmpl.render(

@@ -195,7 +195,7 @@ bikefit/
 ## Tests
 
 ```bash
-python -m pytest        # 65 tests — angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG (données synthétiques)
+python -m pytest        # 87 tests — angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG, report HTML, CLI (données synthétiques)
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
 ```
