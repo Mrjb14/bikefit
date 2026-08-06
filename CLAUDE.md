@@ -52,10 +52,16 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   `_same_source(a, b)` : compare deux sources (fichier résolu, ou chaîne exacte pour flux/webcam) —
   utilisé par le CLI pour interdire de lancer les vues profil et face sur la même caméra.
 - `pose/` : protocole `PoseEstimator` + `MediaPipePoseEstimator` (Tasks API, `pose_landmarker_heavy`) + `LandmarkCache` (Parquet).
-- `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y),
+- `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y,
+  renvoie des **`frame_idx`** — pas des positions de tableau, cf. découpage `--start/--end`),
   `compute_angles` (genou, hanche, tronc, coude, cheville — vectorisé NumPy), `aggregate_cycles` → `FitMetrics`.
+  `visibility.py` : `VISIBILITY_THRESHOLD` (0.5), `reliability_mask`, `weakest_visibility` — filtre les
+  points *inférés* par MediaPipe (cf. principe n°1). `compute_angles` / `compute_frontal_metrics`
+  émettent aussi une colonne `<metrique>_vis` par frame, consommée par l'agrégation et le HUD de debug.
   `frontal.py` (Phase 3C, vue de face) : `compute_frontal_metrics` (déviation angulaire genou vs droite
   hanche-cheville, largeur coudes px) + `aggregate_frontal_cycles` → champs optionnels de `FitMetrics`.
+  `AngleStats` porte `visibility` / `frames_kept` (→ `is_reliable`), optionnels pour rester
+  rétrocompatible avec les sessions déjà enregistrées.
   `FitMetrics` porte des champs optionnels `calibration: CalibrationResult | None` et plan frontal
   (`genou_deviation_gauche/droit`, `largeur_coudes`).
 - `calibration/` : `detect_marker_size_px` (frame unique) + `calibrate_from_video` (vidéo entière,
@@ -68,6 +74,14 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `report/` : `render_html(metrics, report, angle_df, video_path, output_path)` — Jinja2 + Plotly CDN.
   Dark theme, 5 graphes d'angles empilés, schéma SVG du vélo de profil + schéma vue de face (Phase 3C,
   roue en tranche, cintre symétrique) avec annotations optionnelles si métriques plan frontal présentes.
+  Section « Plan frontal » et encart « peu fiable » (visibilité + % de frames) sur toute carte dont
+  `is_reliable` est faux.
+- `debug/` : `render_debug_video_from_landmarks` (fichier : rejeu + superposition des métriques déjà
+  lissées) et `render_debug_video_live` (flux/webcam : écriture pendant l'unique passage, métriques
+  brutes par frame). Le squelette **estompe les segments inférés** (trait fin gris, cercle creux).
+  `DebugVideoWriter(measure_fps=True)` pour les sources live : le fps nominal du capteur n'est pas
+  tenu quand l'inférence tourne en ligne (30 déclarés → ~20 réels = vidéo 1,5× trop rapide), donc le
+  débit réel est mesuré sur les 2 premières secondes avant d'ouvrir le fichier.
 - `storage/` : `Session` (Pydantic) + `SessionStore` (SQLite natif `sqlite3`).
   Opérations : `save`, `get`, `list_all`, `latest`, `delete`. Tri par `date DESC, id DESC`.
 - `measure/` : bootstrap des YAML personnels (`config/rider/`, `config/bikes/`) depuis photo/vidéo.
@@ -115,6 +129,17 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       `--front-debug-video`, sur fichier (angles lissés, post-pipeline) ou flux/webcam (angles bruts,
       écrits pendant la capture). Testé via un faux `PoseEstimator` (pas de MediaPipe dans les tests) :
       `tests/test_debug_video.py`, `TestAnalyzeDebugVideo` dans `tests/test_cli.py`.
+- [x] Fiabilité des mesures (`kinematics/visibility.py`) : les landmarks inférés par MediaPipe sont
+      exclus des angles, et chaque `AngleStats` porte sa visibilité + son taux de frames exploitées.
+      Mesuré sur capture réelle : vue de profil inchangée (côté filmé à 0.94-1.00), mais 60 des
+      63 cycles de la **vue de face** reposaient sur des genoux inférés (genou gauche à 0.32) — la
+      déviation du genou droit passait de +2.6° à -0.3°, soit un changement de signe.
+      **Conséquence matérielle** : les déviations de genoux vue de face ne sont pas exploitables avec
+      le placement actuel de l'ESP32-CAM ; à revoir (hauteur/éclairage) avant d'utiliser cette métrique.
+- [ ] Robustesse des cycles : `detect_cycles` autorise jusqu'à 152 rpm (`min_dist = fps * 0.4`), ce qui
+      laisse passer de faux PMB. Sur une capture réelle, 1 cycle parasite de 0.39 s (vs 0.79 s médian)
+      faisait passer l'écart-type de `genou_extension_pmb` de 2.2° à 9.8°. Un filtre de plausibilité
+      sur la durée des cycles reste à ajouter.
 - [ ] Phase 4 (option) : UI Streamlit.
 
 ## Commandes
@@ -122,9 +147,13 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (115 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG/webcam,
-# report HTML, CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
+# Tests (198 tests : angles, filtre SG, cycles, visibilité/fiabilité, ArUco, recommandations,
+# storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML,
+# CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
+
+# Types (obligatoire en CI, au même titre que ruff)
+uv run mypy src
 
 # Lint + format
 uv run ruff check src tests scripts
@@ -178,8 +207,13 @@ python scripts/spike_bikefit.py video.mp4 --side right
 - Clé de cache : `md5(str(path.resolve()) + str(mtime) + str(size))[:12]` — rapide, pas de hash contenu.
 - Angles vectorisés sur l'ensemble des frames (NumPy), pas de boucle frame par frame.
 - Convention y-bas (OpenCV) : PMB = maximum local de `ankle_y`, détecté par `scipy.find_peaks`.
+  Vaut aussi pour les `world_landmarks` 3D de `measure/body.py` (une cheville a un y *plus grand*
+  qu'une hanche) — l'inverser produit des longueurs négatives, cf. `tests/test_measure_body.py`.
 - Pas de dépendance GPU obligatoire : tout tourne sur CPU.
-- `ruff check` + `ruff format --check` obligatoires en CI (lint + format séparés).
+- `ruff check` + `ruff format --check` + `mypy src` obligatoires en CI (3 étapes séparées).
+- CI : matrice `ubuntu` (3.11, 3.12) **et `windows`** — plateforme de dev principale, seule à
+  révéler les bugs d'encodage console (cp1252) et de séparateurs de chemin. Seuil de couverture
+  `--cov-fail-under=65`.
 
 ## Données runtime (~/.bikefit/)
 Les données générées pendant l'utilisation vivent dans `~/.bikefit/`, hors du repo :
