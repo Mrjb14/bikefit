@@ -464,8 +464,14 @@ def measure_setup(
     annotated = video.with_name(video.stem + "_annotated.jpg")
     try:
         annotate_setup_frame(
-            str(video), df, estimates, calib.mm_per_pixel,
-            reader.width, reader.height, side, annotated,
+            str(video),
+            df,
+            estimates,
+            calib.mm_per_pixel,
+            reader.width,
+            reader.height,
+            side,
+            annotated,
         )
         typer.echo(f"Frame annotée     -> {annotated}")
     except Exception as exc:
