@@ -5,6 +5,14 @@
 # Profils disponibles : clm_court, clm_long, triathlon_XL
 # Le profil actif est sélectionné via --profile ou depuis mensurations.yaml
 
+# `largeur_coudes_ratio` : écart entre coudes rapporté à la largeur d'épaules
+# (plan frontal, vue de face). Exprimé en ratio et non en mm : une largeur de pads
+# n'a de sens que relativement au gabarit du coureur.
+# Plus étroit = plus aéro, mais restreint la respiration et la puissance ; on
+# s'élargit à mesure que l'épreuve s'allonge.
+# Heuristique de fitting, à affiner par l'expérience — comme les coefficients de
+# sensibilité ci-dessous. Nécessite la calibration ArUco sur la vue de face.
+
 clm_court:
   genou_extension_pmb:  {min: 140, max: 148, optimal: 144}
   genou_flexion_pmh:    {min: 65,  max: 75,  optimal: 70}
@@ -12,6 +20,7 @@ clm_court:
   tronc:                {min: 8,   max: 18,  optimal: 12}
   coude:                {min: 88,  max: 100, optimal: 94}
   cheville_pmb:         {min: 130, max: 145, optimal: 137}
+  largeur_coudes_ratio: {min: 0.70, max: 0.90, optimal: 0.80}
 
 clm_long:
   genou_extension_pmb:  {min: 140, max: 148, optimal: 144}
@@ -20,6 +29,7 @@ clm_long:
   tronc:                {min: 10,  max: 20,  optimal: 15}
   coude:                {min: 88,  max: 100, optimal: 94}
   cheville_pmb:         {min: 130, max: 145, optimal: 137}
+  largeur_coudes_ratio: {min: 0.75, max: 0.95, optimal: 0.85}
 
 triathlon_XL:
   genou_extension_pmb:  {min: 140, max: 150, optimal: 145}
@@ -28,6 +38,7 @@ triathlon_XL:
   tronc:                {min: 10,  max: 22,  optimal: 16}
   coude:                {min: 88,  max: 105, optimal: 96}
   cheville_pmb:         {min: 128, max: 148, optimal: 138}
+  largeur_coudes_ratio: {min: 0.80, max: 1.00, optimal: 0.90}
 
 # Coefficients empiriques de sensibilité (degrés par mm de réglage).
 sensitivity:

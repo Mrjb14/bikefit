@@ -248,6 +248,43 @@ def run(
     else:
         ok.append("cheville_pmb")
 
+    # ── Largeur coudes → largeur des pads (plan frontal, vue de face) ────────
+    # Silencieux tant que la mesure n'est pas exploitable : il faut la vue de face
+    # ET la calibration ArUco (sinon la largeur reste en pixels) ET une mesure
+    # fiable (les coudes peuvent être masqués) ET la largeur d'épaules du coureur,
+    # puisque la cible est un ratio. Mieux vaut aucune recommandation qu'une
+    # recommandation fondée sur une mesure devinée.
+    largeur = metrics.largeur_coudes
+    epaules = rider.mensurations.largeur_epaules if rider is not None else None
+
+    if largeur is not None and largeur.is_reliable and epaules:
+        t = targets.get("largeur_coudes_ratio", {})
+        r_min, r_max = t.get("min", 0.80), t.get("max", 1.00)
+        r_opt = t.get("optimal", 0.90)
+        ratio = largeur.mean / epaules
+        cible_mm = r_opt * epaules
+
+        if ratio > r_max or ratio < r_min:
+            trop_large = ratio > r_max
+            delta_total = abs(largeur.mean - cible_mm)
+            recs.append(
+                Recommendation(
+                    reglage="largeur_pads",
+                    direction="resserrer" if trop_large else "elargir",
+                    delta_mm=round(delta_total),
+                    motif=(
+                        f"Écart des coudes {'trop large' if trop_large else 'trop étroit'} "
+                        f"({largeur.mean:.0f} mm = {ratio:.0%} de la largeur d'épaules, "
+                        f"cible {r_min:.0%}-{r_max:.0%}). "
+                        f"Viser ~{cible_mm:.0f} mm, soit {delta_total / 2:.0f} mm par pad."
+                    ),
+                    priorite=Priorite.faible,
+                )
+            )
+            hors_cible.append("largeur_coudes")
+        else:
+            ok.append("largeur_coudes")
+
     # ── Résumé ───────────────────────────────────────────────────────────────
     n_haute = sum(1 for r in recs if r.priorite == Priorite.haute)
     if not recs:

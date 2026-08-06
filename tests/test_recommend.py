@@ -1,6 +1,14 @@
 """Tests du moteur de recommandations sur des FitMetrics synthétiques."""
 
+import pytest
+
 from bikefit.equipment.models import BikeModel, BikeProfile
+from bikefit.equipment.rider import (
+    Mensurations,
+    ObjectifEpreuve,
+    ProfilCoureur,
+    RiderProfile,
+)
 from bikefit.kinematics.metrics import AngleStats, FitMetrics
 from bikefit.recommend import recommend
 from bikefit.recommend.models import Priorite
@@ -108,3 +116,76 @@ class TestRecommendResume:
             _metrics(genou_extension_pmb=155.0, coude=120.0), _bike(), profile="triathlon_XL"
         )
         assert "prioritaire" in report.resume.lower()
+
+
+# ── Largeur des pads (plan frontal) ──────────────────────────────────────────
+
+
+class TestLargeurPads:
+    """La règle ne doit parler que si la mesure est réellement exploitable.
+
+    Elle exige la vue de face + la calibration ArUco (sinon largeur_coudes est None),
+    une mesure fiable (les coudes peuvent être inférés) et la largeur d'épaules du
+    coureur, puisque la cible est un ratio et non une valeur absolue.
+    """
+
+    @staticmethod
+    def _wide_stats(mean: float, *, reliable: bool = True) -> AngleStats:
+        return AngleStats(
+            mean=mean,
+            std=3.0,
+            min=mean - 5,
+            max=mean + 5,
+            n_cycles=20,
+            visibility=0.9 if reliable else 0.3,
+            frames_kept=0.95 if reliable else 0.1,
+        )
+
+    def _run(self, largeur: AngleStats | None, epaules: int | None = 400):
+        metrics = _metrics().model_copy(update={"largeur_coudes": largeur})
+        rider = RiderProfile(
+            mensurations=Mensurations(largeur_epaules=epaules),
+            profil=ProfilCoureur(),
+            objectif=ObjectifEpreuve(),
+        )
+        return recommend(metrics, _bike(), profile="triathlon_XL", rider=rider)
+
+    def _pads(self, report):
+        return [r for r in report.recommandations if r.reglage == "largeur_pads"]
+
+    def test_within_target_gives_no_recommendation(self) -> None:
+        # 360 / 400 = 90 % -> dans la cible 80-100 %
+        report = self._run(self._wide_stats(360.0))
+        assert self._pads(report) == []
+        assert "largeur_coudes" in report.angles_ok
+
+    def test_too_wide_suggests_narrowing(self) -> None:
+        # 440 / 400 = 110 % -> au-dessus du max (100 %)
+        report = self._run(self._wide_stats(440.0))
+        rec = self._pads(report)[0]
+        assert rec.direction == "resserrer"
+        assert rec.delta_mm == pytest.approx(80, abs=1)  # cible 0.90*400 = 360
+        assert "par pad" in rec.motif
+
+    def test_too_narrow_suggests_widening(self) -> None:
+        # 280 / 400 = 70 % -> sous le min (80 %)
+        report = self._run(self._wide_stats(280.0))
+        rec = self._pads(report)[0]
+        assert rec.direction == "elargir"
+        assert rec.delta_mm == pytest.approx(80, abs=1)
+
+    def test_silent_without_calibration(self) -> None:
+        # Pas d'ArUco -> largeur_coudes reste None
+        report = self._run(None)
+        assert self._pads(report) == []
+        assert "largeur_coudes" not in report.angles_ok
+
+    def test_silent_when_measurement_unreliable(self) -> None:
+        # Coudes inférés : aucune recommandation plutôt qu'une reco devinée
+        report = self._run(self._wide_stats(440.0, reliable=False))
+        assert self._pads(report) == []
+
+    def test_silent_without_shoulder_width(self) -> None:
+        # La cible est un ratio : sans largeur d'épaules, rien à comparer
+        report = self._run(self._wide_stats(440.0), epaules=None)
+        assert self._pads(report) == []

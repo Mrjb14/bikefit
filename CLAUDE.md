@@ -71,6 +71,10 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `recommend/` : `run(metrics, bike, profile)` → `FitReport` + `Recommendation` (règles explicites, pas de ML).
   Cibles dans `config/targets_tt.yaml` (profils : `clm_court`, `clm_long`, `triathlon_XL`).
   Coefficients de sensibilité empiriques (°/mm) — seront affinés par calibration ArUco (Phase 3A+).
+  6 réglages : `hauteur_selle`, `recul_selle`, `hauteur_prolongateurs`, `longueur_prolongateurs`,
+  `cale_chaussure` (sagittal) et `largeur_pads` (frontal). Ce dernier compare la largeur de coudes
+  à la largeur d'épaules (`largeur_coudes_ratio` dans targets) : il reste **silencieux** sans
+  calibration ArUco, sans mesure fiable, ou sans `largeur_epaules` renseignée.
 - `report/` : `render_html(metrics, report, angle_df, video_path, output_path)` — Jinja2 + Plotly CDN.
   Dark theme, 5 graphes d'angles empilés, schéma SVG du vélo de profil + schéma vue de face (Phase 3C,
   roue en tranche, cintre symétrique) avec annotations optionnelles si métriques plan frontal présentes.
