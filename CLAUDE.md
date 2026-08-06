@@ -14,6 +14,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `config/rider/mensurations.yaml` : mensurations personnelles + objectif (Ironman 2027-05-21).
 - `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, Tasks API MediaPipe v1.0).
 - `docs/aruco_marker_100mm.png` : marqueur ArUco à imprimer (DICT_4X4_50 ID=0, 100 mm).
+- `firmware/README.md` : installation du firmware ESP32-CAM (flux MJPEG, vue de face Phase 3C).
 - `data/` : vidéos pour les tests manuels du CLI (gitignorées, `*.mp4`).
 
 ## Principes non négociables
@@ -29,11 +30,16 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
    attention aux signes dans les calculs d'angles.
 
 ## Architecture (src/bikefit/)
-- `ingest/` : décodage vidéo (OpenCV), itérateur de frames horodatées (`TimedFrame`).
+- `ingest/` : `VideoReader` — fichier vidéo (OpenCV) ou flux réseau MJPEG (`http(s)://`/`rtsp://`,
+  ex. ESP32-CAM) via parsing manuel des marqueurs JPEG SOI/EOI, itérateur de frames horodatées
+  (`TimedFrame`). Flux réseau : timestamps sur horloge murale, pas de fps fiable côté source.
 - `pose/` : protocole `PoseEstimator` + `MediaPipePoseEstimator` (Tasks API, `pose_landmarker_heavy`) + `LandmarkCache` (Parquet).
 - `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y),
   `compute_angles` (genou, hanche, tronc, coude, cheville — vectorisé NumPy), `aggregate_cycles` → `FitMetrics`.
-  `FitMetrics` porte un champ optionnel `calibration: CalibrationResult | None`.
+  `frontal.py` (Phase 3C, vue de face) : `compute_frontal_metrics` (déviation angulaire genou vs droite
+  hanche-cheville, largeur coudes px) + `aggregate_frontal_cycles` → champs optionnels de `FitMetrics`.
+  `FitMetrics` porte des champs optionnels `calibration: CalibrationResult | None` et plan frontal
+  (`genou_deviation_gauche/droit`, `largeur_coudes`).
 - `calibration/` : `detect_marker_size_px` (frame unique) + `calibrate_from_video` (vidéo entière,
   médiane sur frames échantillonnées) → `CalibrationResult(mm_per_pixel, n_detected, n_sampled, is_reliable)`.
   Dictionnaire ArUco : `DICT_4X4_50`. Marqueur ID=0.
@@ -42,7 +48,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   Cibles dans `config/targets_tt.yaml` (profils : `clm_court`, `clm_long`, `triathlon_XL`).
   Coefficients de sensibilité empiriques (°/mm) — seront affinés par calibration ArUco (Phase 3A+).
 - `report/` : `render_html(metrics, report, angle_df, video_path, output_path)` — Jinja2 + Plotly CDN.
-  Dark theme, 5 graphes d'angles empilés, schéma SVG du vélo avec annotations colorées.
+  Dark theme, 5 graphes d'angles empilés, schéma SVG du vélo de profil + schéma vue de face (Phase 3C,
+  roue en tranche, cintre symétrique) avec annotations optionnelles si métriques plan frontal présentes.
 - `storage/` : `Session` (Pydantic) + `SessionStore` (SQLite natif `sqlite3`).
   Opérations : `save`, `get`, `list_all`, `latest`, `delete`. Tri par `date DESC, id DESC`.
 - `measure/` : bootstrap des YAML personnels (`config/rider/`, `config/bikes/`) depuis photo/vidéo.
@@ -52,6 +59,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   `reach_prolongateurs` par projection sur BB) ; `update_null_fields` (yaml_io) réécrit uniquement les
   champs `null` d'un YAML existant, commentaires préservés. N'écrit jamais un champ déjà renseigné —
   les estimations sont un point de départ (±5-10 % corps, ±20 mm setup), à valider au mètre ruban.
+  `render.py` : annotation visuelle OpenCV (squelette + crochets de cotation) sur la photo/frame PMB,
+  pour vérifier les estimations avant `--write`.
 - `cli.py` : Typer — 5 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`.
   `__main__.py` injecte `analyze` si le premier argument n'est pas un sous-commande.
 
@@ -65,11 +74,16 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       **Marqueur non encore imprimé** — pipeline complet mais non testé sur vidéo réelle avec marqueur.
 - [x] Phase 3B : `storage/` — sessions SQLite, CLI `history` + `compare`, `--save-session`.
 - [x] `measure/` : bootstrap mensurations (`measure-body`) et setup vélo (`measure-setup`) — écrit les
-      champs `null` de `config/rider/*.yaml` et `config/bikes/*.yaml`. **Pas encore de tests dédiés**
-      (`tests/` ne couvre pas `measure/`) — précision non validée face au mètre ruban (voir
-      `docs/procedure-mesures.md`, critère de succès Phase 3A+ : ArUco ≈ ruban à ± 5 mm).
+      champs `null` de `config/rider/*.yaml` et `config/bikes/*.yaml`, avec photo/frame annotée
+      (`render.py`) pour vérification visuelle. **Pas encore de tests dédiés** (`tests/` ne couvre pas
+      `measure/`) — précision non validée face au mètre ruban (voir `docs/procedure-mesures.md`,
+      critère de succès Phase 3A+ : ArUco ≈ ruban à ± 5 mm).
 - [ ] Phase 3A+ : 2ᵉ marqueur ArUco sur le BB → mesure automatique hauteur selle, reach, stack depuis la vidéo.
-- [ ] Phase 3C : vue de face (ESP32-CAM MJPEG), alignement genoux/largeur coudes.
+- [x] Phase 3C : vue de face câblée dans `analyze --front` (fichier ou flux MJPEG ESP32-CAM), métriques
+      déviation genoux + largeur coudes (`kinematics/frontal.py`, testé sur données synthétiques :
+      `tests/test_frontal.py`, `test_aggregate_frontal.py`, `test_ingest.py`), schéma vélo face dans le
+      rapport HTML, firmware ESP32-CAM (`firmware/`). Testé manuellement en direct (vidéo + flux réel),
+      pas de jalon de précision chiffré pour l'instant (contrairement au ±2° de la Phase 1).
 - [ ] Phase 4 (option) : UI Streamlit.
 
 ## Commandes
@@ -77,7 +91,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (49 tests : angles, ArUco, recommandations, storage)
+# Tests (65 tests : angles, ArUco, recommandations, storage, plan frontal, ingest MJPEG)
 python -m pytest
 
 # Lint + format
@@ -89,6 +103,10 @@ python -m bikefit video.mp4 --side right --profile triathlon_XL
 
 # Pipeline avec calibration ArUco (marqueur 100 mm collé sur le cadre)
 python -m bikefit video.mp4 --side right --marker-size 100 --save-session
+
+# Pipeline avec vue de face (Phase 3C) — fichier ou flux MJPEG ESP32-CAM
+python -m bikefit video.mp4 --side right --front video_face.mp4
+python -m bikefit video.mp4 --side right --front http://192.168.1.42/stream --front-duration 60
 
 # Historique des sessions
 python -m bikefit history
@@ -127,8 +145,10 @@ Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR
 
 ## Matériel de l'utilisateur (contexte capture)
 - Tacx Neo 2 (direct drive), smartphone 1080p/30fps, vue profil = source principale.
-- ESP32-CAM (basse résolution ~15-25 fps) — éventuelle vue de face (Phase 3C), flux MJPEG HTTP.
-- Le module ingest doit accepter : fichier vidéo ET flux réseau MJPEG.
+- ESP32-CAM (basse résolution ~15-25 fps) — vue de face (Phase 3C), flux MJPEG HTTP, `--front`.
+  Firmware et doc de flash dans `firmware/`. Limite matérielle : un seul client HTTP à la fois
+  (`WiFiServer` basique côté firmware) — fermer tout autre lecteur du flux avant de lancer une capture.
+- Le module ingest accepte fichier vidéo ET flux réseau MJPEG (`http(s)://`/`rtsp://`).
 - Vidéos non versionnées (trop volumineuses) — dans `data/`, gitignorées.
 - Marqueur ArUco : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal côté caméra.
   Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.
