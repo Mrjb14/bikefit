@@ -48,7 +48,10 @@ target-version = "py311"
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12 et non 3.11 (le plancher de requires-python) : les stubs embarqués de
+# numpy utilisent la syntaxe `type X = ...` que mypy ne sait parser qu'en 3.12+.
+# Le support 3.11 reste vérifié à l'exécution par la matrice de tests CI.
+python_version = "3.12"
 strict = false
 ignore_missing_imports = true
 
