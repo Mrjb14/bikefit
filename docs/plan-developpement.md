@@ -301,11 +301,15 @@ bikefit/
 - Nécessaire en pratique : la montée et la descente du vélo faussaient la recommandation de
   prolongateurs (-111 mm sur la vidéo entière contre -48 mm sur le segment pédalé).
 
-### Robustesse des cycles *(à faire)*
+### Robustesse des cycles ✅
 - `detect_cycles` autorise jusqu'à 152 rpm (`min_dist = fps * 0.4`), ce qui laisse passer de faux
   PMB. Sur une capture réelle, 1 cycle parasite de 0.39 s (médiane 0.79 s) faisait passer
   l'écart-type de `genou_extension_pmb` de 2.2° à 9.8°.
-- Ajouter un filtre de plausibilité sur la durée des cycles (rejet des écarts à la médiane).
+- `_filter_implausible_cycles` (`kinematics/cycles.py`) rejette tout cycle dont la durée s'écarte de
+  plus de 35% (`CYCLE_DURATION_TOLERANCE`) de la médiane des cycles détectés, à partir de 3 cycles
+  (`MIN_CYCLES_FOR_PLAUSIBILITY_FILTER` — sous ce seuil la médiane n'est pas assez fiable). Testé sur
+  signaux synthétiques (`tests/test_cycles.py`) : faux PMB reproduisant le cas réel, variation de
+  cadence naturelle (20%) préservée, pas de filtrage en dessous de 3 cycles.
 
 ### Phase 4 — UI web *(optionnel)*
 - Streamlit : upload vidéo, squelette superposé, rapport interactif, historique sessions.

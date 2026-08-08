@@ -7,7 +7,7 @@ Convention y-bas (OpenCV) : le PMB est un MAXIMUM local de ankle_y
 import numpy as np
 import pandas as pd
 
-from bikefit.kinematics.cycles import detect_cycles
+from bikefit.kinematics.cycles import _filter_implausible_cycles, detect_cycles
 from bikefit.kinematics.landmarks import BODY
 
 
@@ -117,6 +117,57 @@ class TestDetectCycles:
         # Moins de 2 PMB → aucun cycle complet mesurable
         df = _pedaling_df(n_cycles=0.5)
         assert detect_cycles(df, "right", fps=30.0) == []
+
+    def test_rejects_implausible_short_cycle(self) -> None:
+        # Reproduit le cas réel documenté dans CLAUDE.md : 1 faux PMB au milieu
+        # de cycles par ailleurs réguliers (24 frames), qui produit un cycle de
+        # 13 frames — largement sous le seuil de tolérance (35% de la médiane).
+        fps = 30.0
+        peak_frames = [12, 36, 60, 73, 97, 121]
+        n = 140
+        t = np.arange(n)
+        ankle_y = np.zeros(n, dtype=float)
+        for p in peak_frames:
+            ankle_y += np.exp(-((t - p) ** 2) / (2 * 2.0**2))
+
+        ankle_idx = BODY["right"]["ankle"]
+        df = pd.DataFrame(
+            {
+                "frame_idx": t,
+                "timestamp_ms": (t * 1000 / fps).astype(int),
+                "detected": np.ones(n, dtype=bool),
+                f"lm_{ankle_idx}_x": np.full(n, 0.5),
+                f"lm_{ankle_idx}_y": ankle_y,
+            }
+        )
+        cycles = detect_cycles(df, "right", fps=fps)
+        durations = [end - start for start, end in cycles]
+        assert durations == [24, 24, 24, 24]
+
+
+class TestFilterImplausibleCycles:
+    def test_keeps_regular_cycles(self) -> None:
+        cycles = [(0, 20), (20, 40), (40, 60), (60, 80)]
+        assert _filter_implausible_cycles(cycles) == cycles
+
+    def test_drops_outlier_far_from_median(self) -> None:
+        cycles = [(0, 20), (20, 40), (40, 52), (52, 72), (72, 92)]
+        assert _filter_implausible_cycles(cycles) == [
+            (0, 20),
+            (20, 40),
+            (52, 72),
+            (72, 92),
+        ]
+
+    def test_keeps_natural_cadence_variation(self) -> None:
+        # Écart de 20% à la médiane : variation de cadence plausible, pas un faux PMB
+        cycles = [(0, 20), (20, 40), (40, 64), (64, 84), (84, 104)]
+        assert _filter_implausible_cycles(cycles) == cycles
+
+    def test_no_filtering_below_minimum_cycle_count(self) -> None:
+        # 2 cycles seulement : impossible de distinguer l'outlier de la norme
+        cycles = [(0, 20), (20, 32)]
+        assert _filter_implausible_cycles(cycles) == cycles
 
 
 class TestFrameIdxAlignment:

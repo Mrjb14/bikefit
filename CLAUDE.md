@@ -53,7 +53,9 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   utilisé par le CLI pour interdire de lancer les vues profil et face sur la même caméra.
 - `pose/` : protocole `PoseEstimator` + `MediaPipePoseEstimator` (Tasks API, `pose_landmarker_heavy`) + `LandmarkCache` (Parquet).
 - `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y,
-  renvoie des **`frame_idx`** — pas des positions de tableau, cf. découpage `--start/--end`),
+  renvoie des **`frame_idx`** — pas des positions de tableau, cf. découpage `--start/--end` — et
+  rejette via `_filter_implausible_cycles` tout cycle dont la durée s'écarte de plus de 35% de la
+  médiane, à partir de 3 cycles détectés),
   `compute_angles` (genou, hanche, tronc, coude, cheville — vectorisé NumPy), `aggregate_cycles` → `FitMetrics`.
   `visibility.py` : `VISIBILITY_THRESHOLD` (0.5), `reliability_mask`, `weakest_visibility` — filtre les
   points *inférés* par MediaPipe (cf. principe n°1). `compute_angles` / `compute_frontal_metrics`
@@ -140,10 +142,11 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       déviation du genou droit passait de +2.6° à -0.3°, soit un changement de signe.
       **Conséquence matérielle** : les déviations de genoux vue de face ne sont pas exploitables avec
       le placement actuel de l'ESP32-CAM ; à revoir (hauteur/éclairage) avant d'utiliser cette métrique.
-- [ ] Robustesse des cycles : `detect_cycles` autorise jusqu'à 152 rpm (`min_dist = fps * 0.4`), ce qui
+- [x] Robustesse des cycles : `detect_cycles` autorise jusqu'à 152 rpm (`min_dist = fps * 0.4`), ce qui
       laisse passer de faux PMB. Sur une capture réelle, 1 cycle parasite de 0.39 s (vs 0.79 s médian)
-      faisait passer l'écart-type de `genou_extension_pmb` de 2.2° à 9.8°. Un filtre de plausibilité
-      sur la durée des cycles reste à ajouter.
+      faisait passer l'écart-type de `genou_extension_pmb` de 2.2° à 9.8°. `_filter_implausible_cycles`
+      rejette désormais tout cycle dont la durée s'écarte de plus de 35% de la médiane (à partir de
+      3 cycles détectés, sous ce seuil la médiane n'est pas fiable).
 - [ ] Phase 4 (option) : UI Streamlit.
 
 ## Commandes
@@ -151,7 +154,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (198 tests : angles, filtre SG, cycles, visibilité/fiabilité, ArUco, recommandations,
+# Tests (209 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco, recommandations,
 # storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML,
 # CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
