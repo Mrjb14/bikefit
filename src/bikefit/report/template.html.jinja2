@@ -24,6 +24,7 @@
     .metric-card.warn .metric-value { color: #fc8181; }
     .metric-std   { font-size: 0.75rem; color: #718096; }
     .metric-range { font-size: 0.72rem; color: #4a5568; margin-top: .25rem; }
+    .metric-unreliable { font-size: 0.72rem; color: #fbd38d; margin-top: .35rem; background: #ed893622; border-radius: 4px; padding: .15rem .4rem; cursor: help; }
     /* recommandations */
     .rec-list { display: flex; flex-direction: column; gap: .75rem; margin-bottom: 2rem; }
     .rec-card { background: #1a202c; border-radius: 8px; padding: 1rem 1.25rem; display: flex; align-items: flex-start; gap: 1rem; border: 1px solid #2d3748; }
@@ -87,9 +88,39 @@
       <div class="metric-name">{{ label }}</div>
       <div class="metric-value">{{ "%.1f"|format(stat.mean) }}°</div>
       <div class="metric-std">± {{ "%.1f"|format(stat.std) }}° &nbsp; [{{ "%.1f"|format(stat.min) }} – {{ "%.1f"|format(stat.max) }}]</div>
+      {% if not stat.is_reliable %}
+      <div class="metric-unreliable" title="Calculée sur des points inférés par le modèle, pas réellement observés">
+        ⚠ peu fiable — visibilité {{ "%.2f"|format(stat.visibility) }}, {{ "%.0f"|format(stat.frames_kept * 100) }}% des frames
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
+
+  {% if metrics.genou_deviation_gauche or metrics.genou_deviation_droit or metrics.largeur_coudes %}
+  <h2>Plan frontal (vue de face)</h2>
+  <div class="metrics-grid">
+    {% set frontal_cards = [
+      ("Déviation genou G", metrics.genou_deviation_gauche, "°"),
+      ("Déviation genou D", metrics.genou_deviation_droit, "°"),
+      ("Largeur coudes",    metrics.largeur_coudes,         " mm"),
+    ] %}
+    {% for label, stat, unit in frontal_cards %}
+    {% if stat %}
+    <div class="metric-card {{ 'warn' if not stat.is_reliable else 'ok' }}">
+      <div class="metric-name">{{ label }}</div>
+      <div class="metric-value">{{ "%.1f"|format(stat.mean) }}{{ unit }}</div>
+      <div class="metric-std">± {{ "%.1f"|format(stat.std) }}{{ unit }} &nbsp; {{ stat.n_cycles }} cycles</div>
+      {% if not stat.is_reliable %}
+      <div class="metric-unreliable" title="Calculée sur des points inférés par le modèle, pas réellement observés">
+        ⚠ peu fiable — visibilité {{ "%.2f"|format(stat.visibility) }}, {{ "%.0f"|format(stat.frames_kept * 100) }}% des frames
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <h2>Recommandations</h2>
   {% if report.recommandations %}

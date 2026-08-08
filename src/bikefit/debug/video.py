@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from bikefit.kinematics.landmarks import SKELETON_EDGES
+from bikefit.kinematics.visibility import VISIBILITY_THRESHOLD
 
 if TYPE_CHECKING:
     from bikefit.ingest.reader import TimedFrame, VideoReader
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
 
 _BONE = (170, 170, 170)  # BGR
 _DOT = (60, 220, 90)
+# Segments/points inférés par le modèle : volontairement discrets
+_BONE_WEAK = (80, 80, 80)
+_DOT_WEAK = (90, 130, 100)
 _STATUS_OK = (80, 220, 80)
 _STATUS_MISSING = (60, 60, 230)
 _HUD_TEXT = (235, 235, 235)
@@ -48,6 +52,15 @@ def _row_to_points(row: pd.Series, width: int, height: int) -> list[tuple[int, i
     return points
 
 
+def _row_to_visibility(row: pd.Series) -> list[float]:
+    """Score de visibilité des 33 landmarks (1.0 si la colonne est absente)."""
+    out: list[float] = []
+    for i in range(33):
+        v = row.get(f"lm_{i}_vis")
+        out.append(1.0 if v is None or pd.isna(v) else float(v))
+    return out
+
+
 def _format_hud(row: pd.Series, columns: list[tuple[str, str, str]]) -> list[str]:
     """columns : (colonne, libellé, unité) -> lignes de texte "libellé : valeur unité"."""
     lines = []
@@ -60,14 +73,38 @@ def _format_hud(row: pd.Series, columns: list[tuple[str, str, str]]) -> list[str
     return lines
 
 
-def _draw_skeleton(img: np.ndarray, points: list[tuple[int, int] | None]) -> None:
+def _draw_skeleton(
+    img: np.ndarray,
+    points: list[tuple[int, int] | None],
+    visibility: list[float] | None = None,
+    threshold: float = VISIBILITY_THRESHOLD,
+) -> None:
+    """Trace le squelette, en estompant ce que le modèle a inféré plutôt qu'observé.
+
+    Sans distinction visuelle, le côté opposé à la caméra (visibilité ~0.3) s'affiche
+    aussi nettement que le côté filmé : la vidéo de debug donne alors l'impression
+    d'une pose entièrement mesurée, alors que la moitié est devinée.
+    """
+
+    def _reliable(i: int) -> bool:
+        return visibility is None or visibility[i] >= threshold
+
     for a, b in SKELETON_EDGES:
         pa, pb = points[a], points[b]
-        if pa is not None and pb is not None:
-            cv2.line(img, pa, pb, _BONE, 2, cv2.LINE_AA)
-    for p in points:
-        if p is not None:
+        if pa is None or pb is None:
+            continue
+        solid = _reliable(a) and _reliable(b)
+        color = _BONE if solid else _BONE_WEAK
+        cv2.line(img, pa, pb, color, 2 if solid else 1, cv2.LINE_AA)
+
+    for i, p in enumerate(points):
+        if p is None:
+            continue
+        if _reliable(i):
             cv2.circle(img, p, 4, _DOT, -1, cv2.LINE_AA)
+        else:
+            # Contour creux : le point existe mais n'est pas une observation
+            cv2.circle(img, p, 3, _DOT_WEAK, 1, cv2.LINE_AA)
 
 
 def _draw_hud(
@@ -172,10 +209,11 @@ class DebugVideoWriter:
         detected: bool,
         frame_idx: int,
         timestamp_ms: int,
+        visibility: list[float] | None = None,
     ) -> None:
         img = frame_bgr.copy()
         if points_px is not None:
-            _draw_skeleton(img, points_px)
+            _draw_skeleton(img, points_px, visibility)
         _draw_hud(img, hud_lines, detected, frame_idx, timestamp_ms)
 
         if self._writer is not None:
@@ -233,18 +271,26 @@ def render_debug_video_from_landmarks(
         for frame in reader.frames():
             detected = False
             points_px = None
+            visibility = None
             if frame.frame_idx in landmarks_by_frame.index:
                 row = landmarks_by_frame.loc[frame.frame_idx]
                 detected = bool(row["detected"])
                 if detected:
                     points_px = _row_to_points(row, reader.width, reader.height)
+                    visibility = _row_to_visibility(row)
 
             hud_lines: list[str] = []
             if frame.frame_idx in metrics_by_frame.index:
                 hud_lines = _format_hud(metrics_by_frame.loc[frame.frame_idx], hud_columns)
 
             writer.write(
-                frame.frame_bgr, points_px, hud_lines, detected, frame.frame_idx, frame.timestamp_ms
+                frame.frame_bgr,
+                points_px,
+                hud_lines,
+                detected,
+                frame.frame_idx,
+                frame.timestamp_ms,
+                visibility,
             )
             if progress and frame.frame_idx % 100 == 0:
                 print(f"  frame {frame.frame_idx}/{reader.frame_count or '?'}")
@@ -280,9 +326,11 @@ def render_debug_video_live(
         def _on_frame(frame: TimedFrame, fl: FrameLandmarks) -> None:
             row_df = pd.DataFrame([_fl_to_dict(fl)])
             points_px = None
+            visibility = None
             hud_lines: list[str] = []
             if fl.detected:
                 points_px = _row_to_points(row_df.iloc[0], reader.width, reader.height)
+                visibility = _row_to_visibility(row_df.iloc[0])
                 metrics_row = compute_metrics(row_df).iloc[0]
                 hud_lines = _format_hud(metrics_row, hud_columns)
             writer.write(
@@ -292,6 +340,7 @@ def render_debug_video_live(
                 fl.detected,
                 frame.frame_idx,
                 frame.timestamp_ms,
+                visibility,
             )
 
         return compute_landmarks(

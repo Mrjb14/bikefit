@@ -44,7 +44,9 @@ Logiciel d'analyse vidéo pour le réglage d'un vélo de contre-la-montre, basé
 ### 2.2 Module Pose Estimation — ✅ implémenté
 - Moteur : **MediaPipe Pose Tasks API v1.0** (`pose_landmarker_heavy`, `VisionRunningMode.VIDEO`).
 - Protocole `PoseEstimator` (Strategy) : le code métier n'importe jamais MediaPipe directement.
-- `LandmarkCache` : clé `md5(path+mtime+size)[:12]`, stockage Parquet dans `cache/landmarks/`.
+- `LandmarkCache` : clé `md5(path+mtime+size)[:12]`, stockage Parquet dans `~/.bikefit/cache/landmarks/`
+  (les données runtime — modèle, cache, `sessions.db` — vivent hors du dépôt).
+  ⚠️ La clé contient le chemin **résolu** : déplacer une vidéo source invalide son cache.
   Recalcul uniquement si la vidéo a changé. Tout le pipeline en aval se rejoue en < 1 s.
 - `FrameLandmarks` : 33 landmarks (x, y, z, visibilité) normalisés + flag `detected`.
 
@@ -172,12 +174,14 @@ bikefit/
 ├── firmware/
 │   ├── README.md                 # installation/flash ESP32-CAM
 │   └── esp32cam_mjpeg/           # sketch Arduino, serveur MJPEG HTTP (vue de face)
-├── models/                       # modèles MediaPipe .task (gitignorés)
-├── cache/landmarks/              # Parquet par vidéo (gitignorés)
+├── data/                         # données locales, entièrement gitignoré
+│   ├── sources/                  # vidéos et photos d'entrée
+│   └── outputs/                  # reports/ · metrics/ · debug/ · annotated/
 ├── scripts/
 │   └── spike_bikefit.py          # Phase 0
 └── src/bikefit/
-    ├── _paths.py                 # PROJECT_ROOT, MODELS_DIR, CACHE_DIR, CONFIG_DIR
+    ├── _paths.py                 # PROJECT_ROOT, MODELS_DIR, CACHE_DIR, CONFIG_DIR,
+    │                             #   REPORTS_DIR, ANNOTATED_DIR (BIKEFIT_OUTPUTS_DIR)
     ├── cli.py                    # Typer — analyze (--front) / history / compare / measure-body / measure-setup
     ├── __main__.py               # injection du sous-commande par défaut
     ├── ingest/
@@ -278,6 +282,31 @@ bikefit/
   synthétiques). Testé manuellement en direct (vidéo + flux ESP32-CAM réel), mais **pas de jalon de
   précision chiffré pour l'instant** — contrairement au ±2° de la Phase 1.
 
+### Fiabilité des mesures ✅ *(hors plan initial — mise en œuvre du principe n°1)*
+- `kinematics/visibility.py` : seuil `VISIBILITY_THRESHOLD` (0.5), `reliability_mask`,
+  `weakest_visibility`. Un angle dont un sommet est *inféré* par MediaPipe est mis à NaN.
+- `AngleStats` porte `visibility` + `frames_kept` (→ `is_reliable`), optionnels donc
+  rétrocompatibles avec les sessions déjà enregistrées.
+- Restitution : avertissement CLI, encart « peu fiable » et section Plan frontal dans le rapport
+  HTML, segments estompés dans les vidéos de debug.
+- **Résultat sur capture réelle** : vue de profil inchangée (côté filmé à 0.94-1.00), mais 60 des
+  63 cycles de la vue de face reposaient sur des genoux inférés (0.32) — la déviation du genou
+  droit passait de +2.6° à -0.3°, soit un changement de signe.
+- **Conséquence matérielle** : les déviations de genoux vue de face ne sont pas exploitables avec
+  le placement actuel de l'ESP32-CAM. Cadrage/éclairage à revoir avant d'utiliser cette métrique.
+
+### Découpage des vidéos ✅
+- `--start`/`--end` et `--front-start`/`--front-end`, appliqués **après** le cache de landmarks :
+  ajuster les bornes se rejoue instantanément.
+- Nécessaire en pratique : la montée et la descente du vélo faussaient la recommandation de
+  prolongateurs (-111 mm sur la vidéo entière contre -48 mm sur le segment pédalé).
+
+### Robustesse des cycles *(à faire)*
+- `detect_cycles` autorise jusqu'à 152 rpm (`min_dist = fps * 0.4`), ce qui laisse passer de faux
+  PMB. Sur une capture réelle, 1 cycle parasite de 0.39 s (médiane 0.79 s) faisait passer
+  l'écart-type de `genou_extension_pmb` de 2.2° à 9.8°.
+- Ajouter un filtre de plausibilité sur la durée des cycles (rejet des écarts à la médiane).
+
 ### Phase 4 — UI web *(optionnel)*
 - Streamlit : upload vidéo, squelette superposé, rapport interactif, historique sessions.
 
@@ -287,7 +316,8 @@ bikefit/
 
 - **Cache Parquet** : la pose n'est calculée qu'une fois par vidéo (clé mtime+size).
 - **Angles vectorisés** : `compute_angles` traite toutes les frames en une passe NumPy.
-- **NaN propre** : les frames non détectées propagent NaN à travers filtre → angles → agrégation.
+- **NaN propre** : les frames non détectées — et les landmarks inférés (visibilité < 0.5) —
+  propagent NaN à travers filtre → angles → agrégation.
 - **Moyenne multi-cycles** (N=59 sur la vidéo de référence) : robustesse sans coût GPU.
 - **ArUco médiane** : `calibrate_from_video` échantillonne 1 frame / 10, médiane → robuste aux occlusions.
 - **SQLite natif** : pas de dépendance ORM, `sqlite3` de la stdlib suffit.

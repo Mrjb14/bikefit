@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 
 from bikefit.kinematics.landmarks import BODY, Side
+from bikefit.kinematics.visibility import (
+    VISIBILITY_THRESHOLD,
+    reliability_mask,
+    weakest_visibility,
+)
 
 
 def _px(df: pd.DataFrame, lm_idx: int, width: int, height: int) -> np.ndarray:
@@ -31,7 +36,12 @@ def _knee_deviation_angle(hip: np.ndarray, ankle: np.ndarray, knee: np.ndarray) 
         return np.degrees(np.arctan2(cross, dot))
 
 
-def compute_frontal_metrics(df: pd.DataFrame, width: int, height: int) -> pd.DataFrame:
+def compute_frontal_metrics(
+    df: pd.DataFrame,
+    width: int,
+    height: int,
+    visibility_threshold: float = VISIBILITY_THRESHOLD,
+) -> pd.DataFrame:
     """Calcule les métriques plan frontal par frame depuis les landmarks vue de face.
 
     Renvoie un DataFrame avec :
@@ -45,6 +55,8 @@ def compute_frontal_metrics(df: pd.DataFrame, width: int, height: int) -> pd.Dat
         "timestamp_ms": df["timestamp_ms"].to_numpy(),
     }
 
+    unreliable: dict[str, np.ndarray] = {}
+
     sides: tuple[tuple[Side, str], ...] = (
         ("left", "genou_deviation_gauche"),
         ("right", "genou_deviation_droit"),
@@ -53,16 +65,22 @@ def compute_frontal_metrics(df: pd.DataFrame, width: int, height: int) -> pd.Dat
         hip = _px(df, BODY[side]["hip"], width, height)
         knee = _px(df, BODY[side]["knee"], width, height)
         ankle = _px(df, BODY[side]["ankle"], width, height)
+        idx = (BODY[side]["hip"], BODY[side]["knee"], BODY[side]["ankle"])
         rows[key] = _knee_deviation_angle(hip, ankle, knee)
+        rows[f"{key}_vis"] = weakest_visibility(df, idx)
+        unreliable[key] = ~reliability_mask(df, idx, visibility_threshold)
 
     left_elbow = _px(df, BODY["left"]["elbow"], width, height)
     right_elbow = _px(df, BODY["right"]["elbow"], width, height)
+    elbow_idx = (BODY["left"]["elbow"], BODY["right"]["elbow"])
     rows["largeur_coudes_px"] = np.linalg.norm(left_elbow - right_elbow, axis=1)
+    rows["largeur_coudes_px_vis"] = weakest_visibility(df, elbow_idx)
+    unreliable["largeur_coudes_px"] = ~reliability_mask(df, elbow_idx, visibility_threshold)
 
-    # Propagation NaN : si frame non détectée, toutes les métriques → NaN
+    # Propagation NaN : frame non détectée, ou point inféré plutôt qu'observé
     not_detected = ~df["detected"].to_numpy(dtype=bool)
     for key in ("genou_deviation_gauche", "genou_deviation_droit", "largeur_coudes_px"):
         rows[key] = rows[key].copy()
-        rows[key][not_detected] = np.nan
+        rows[key][not_detected | unreliable[key]] = np.nan
 
     return pd.DataFrame(rows)

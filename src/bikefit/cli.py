@@ -44,6 +44,41 @@ _FRONT_HUD_COLUMNS: list[tuple[str, str, str]] = [
 ]
 
 
+_CONFIDENCE_LABELS = {
+    **_ANGLE_LABELS,
+    "genou_deviation_gauche": "Déviation genou G",
+    "genou_deviation_droit": "Déviation genou D",
+    "largeur_coudes": "Largeur coudes",
+}
+
+
+def _warn_unreliable(metrics: object) -> None:
+    """Signale les métriques reposant majoritairement sur des landmarks inférés."""
+    from bikefit.kinematics.metrics import AngleStats
+
+    suspects = []
+    for field, label in _CONFIDENCE_LABELS.items():
+        stat = getattr(metrics, field, None)
+        if isinstance(stat, AngleStats) and not stat.is_reliable:
+            suspects.append((label, stat))
+
+    if not suspects:
+        return
+
+    typer.echo("\nAvertissement : métriques peu fiables (points inférés par le modèle) :", err=True)
+    for label, stat in suspects:
+        typer.echo(
+            f"  {label} : visibilité {stat.visibility:.2f},"
+            f" {stat.frames_kept:.0%} des frames exploitables",
+            err=True,
+        )
+    typer.echo(
+        "  -> à interpréter avec prudence : améliorer le cadrage ou l'éclairage"
+        " de la caméra concernée.",
+        err=True,
+    )
+
+
 def _trim_landmarks(
     df: pd.DataFrame,
     fps: float,
@@ -360,6 +395,11 @@ def analyze(
                 frontal_df, front_cycles, mm_per_pixel=mm_per_px
             )
             metrics = metrics.model_copy(update=frontal_stats)
+
+    # ── Fiabilité ────────────────────────────────────────────────────────────
+    # Une métrique calculée sur des points inférés doit se voir, pas se deviner
+    # en relisant le JSON (principe n°1 : indice de confiance systématique).
+    _warn_unreliable(metrics)
 
     # ── Équipement ───────────────────────────────────────────────────────────
     try:

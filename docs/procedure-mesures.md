@@ -25,14 +25,20 @@ La validation physique est obligatoire avant de considérer une mesure comme fia
 
 ```bash
 # Sans écriture — vérification visuelle d'abord
-python -m bikefit measure-body photo_debout.jpg
+python -m bikefit measure-body data/sources/photo_debout.jpg
 
 # Si les valeurs sont cohérentes, écriture dans le YAML
-python -m bikefit measure-body photo_debout.jpg --write
+python -m bikefit measure-body data/sources/photo_debout.jpg --write
 ```
 
-La commande utilise `taille` (déjà renseigné à 179 mm) pour calibrer l'échelle.
+La photo annotée (squelette + crochets de cotation) est écrite dans
+`data/outputs/annotated/<photo>_annotated.jpg` — à regarder avant tout `--write`.
+
+La commande utilise `taille` (renseignée en **mm**, ex. 1790 pour 1,79 m) pour calibrer l'échelle.
 Elle ne remplace **jamais** un champ déjà renseigné — seuls les champs `null` sont mis à jour.
+
+⚠️ Toutes les longueurs de `config/rider/mensurations.yaml` sont en **millimètres**. Saisir 179
+au lieu de 1790 fausse silencieusement toute la mise à l'échelle.
 
 **Précision attendue :** ±5 à 10 % — suffisant comme point de départ, à confirmer au ruban.
 
@@ -84,11 +90,14 @@ Mesurer pieds nus, debout sur une surface plane. Faire mesurer par une deuxième
 
 ```bash
 # Sans écriture — vérifier les estimations
-python -m bikefit measure-setup video.mp4 --marker-size 100 --side right
+python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side right
 
 # Si cohérent, écriture dans le YAML
-python -m bikefit measure-setup video.mp4 --marker-size 100 --side right --write
+python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side right --write
 ```
+
+La frame annotée (trajectoire de la cheville, BB estimé, cotes) est écrite dans
+`data/outputs/annotated/<video>_annotated.jpg`.
 
 **Correction obligatoire pour `hauteur_selle_bb` :**
 La commande mesure la distance BB → **articulation de la hanche** au PMB, pas jusqu'au sommet de la selle.
@@ -145,13 +154,23 @@ Le cycle de validation est le suivant :
 ```
 1. measure-body (photo) → mensurations.yaml   [bootstrap]
 2. Confirmer au mètre ruban → corriger si écart > 10 mm
-3. Filmer sur le home trainer (sans marqueur) → python -m bikefit video.mp4
+3. Filmer sur le home trainer (sans marqueur)
+   → python -m bikefit data/sources/video.mp4 --start 20 --end 70
 4. Lire les recommandations (delta_mm) → appliquer physiquement le réglage
 5. Mesurer le nouveau setup au ruban → remplir setup_actuel
-6. Refilmer (avec marqueur ArUco) → python -m bikefit video.mp4 --marker-size 100 --save-session
+6. Refilmer (avec marqueur ArUco)
+   → python -m bikefit data/sources/video.mp4 --marker-size 100 --start 20 --end 70 --save-session
 7. Comparer les sessions → python -m bikefit compare ID_avant ID_après
 8. Répéter jusqu'à ce que les angles soient dans les cibles
 ```
+
+**Toujours découper** (`--start`/`--end`) : la montée et la descente du vélo faussent lourdement
+les moyennes. Sur une capture de 79 s, les ~30 s hors pédalage faisaient passer la recommandation
+de prolongateurs de −48 mm à −111 mm.
+
+**Vérifier la fiabilité** : si l'analyse affiche `métriques peu fiables (points inférés)`, la
+mesure concernée repose sur des positions devinées par MediaPipe — corriger le cadrage ou
+l'éclairage de la caméra avant d'exploiter ce chiffre.
 
 **Critère de succès Phase 3A+ :** mesure ArUco (`measure-setup`) ≈ mesure ruban à ± 5 mm.
 
