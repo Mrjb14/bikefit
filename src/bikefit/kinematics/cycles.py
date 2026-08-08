@@ -6,6 +6,29 @@ from scipy.signal import find_peaks
 
 from bikefit.kinematics.landmarks import BODY, Side
 
+# Rejette un cycle dont la durée s'écarte de plus de 35% de la médiane des cycles
+# détectés : un faux PMB (bruit de détection) produit un cycle anormalement court,
+# qui fausse l'écart-type des angles agrégés (cf. CLAUDE.md, "Robustesse des cycles").
+CYCLE_DURATION_TOLERANCE = 0.35
+
+# Sous ce nombre de cycles, la médiane n'est pas assez fiable pour distinguer
+# un vrai outlier d'une variation normale de cadence.
+MIN_CYCLES_FOR_PLAUSIBILITY_FILTER = 3
+
+
+def _filter_implausible_cycles(cycles: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Rejette les cycles dont la durée s'écarte trop de la médiane (faux PMB)."""
+    if len(cycles) < MIN_CYCLES_FOR_PLAUSIBILITY_FILTER:
+        return cycles
+
+    durations = np.array([end - start for start, end in cycles], dtype=float)
+    median = float(np.median(durations))
+    if median <= 0:
+        return cycles
+
+    plausible = np.abs(durations - median) <= CYCLE_DURATION_TOLERANCE * median
+    return [cycle for cycle, keep in zip(cycles, plausible, strict=True) if keep]
+
 
 def detect_cycles(
     df: pd.DataFrame,
@@ -16,6 +39,8 @@ def detect_cycles(
 
     Retourne une liste de (frame_début, frame_fin) pour chaque cycle complet.
     Le point mort bas (PMB) correspond au maximum de y_cheville (cheville en bas de course).
+    Les cycles dont la durée s'écarte trop de la médiane (faux PMB) sont rejetés,
+    cf. `_filter_implausible_cycles`.
     """
     ankle_idx = BODY[side]["ankle"]
     ankle_y = df[f"lm_{ankle_idx}_y"].to_numpy(dtype=float)
@@ -40,7 +65,8 @@ def detect_cycles(
     # découpent ensuite. Identique tant que le DataFrame part de la frame 0 sans trou,
     # mais indispensable dès qu'il est tronqué (options --start/--end).
     frame_ids = df["frame_idx"].to_numpy()
-    return [
+    cycles = [
         (int(frame_ids[pmb_indices[i]]), int(frame_ids[pmb_indices[i + 1]]))
         for i in range(len(pmb_indices) - 1)
     ]
+    return _filter_implausible_cycles(cycles)
