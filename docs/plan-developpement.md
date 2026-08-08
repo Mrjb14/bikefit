@@ -59,15 +59,28 @@ Logiciel d'analyse vidéo pour le réglage d'un vélo de contre-la-montre, basé
 - Dictionnaire : `DICT_4X4_50`, marqueur ID=0. Fichier à imprimer : `docs/aruco_marker_100mm.png`.
 - Activé par `--marker-size <mm>` sur la CLI ; stocké dans `FitMetrics.calibration`.
 
-**Approche intermédiaire déjà livrée (`measure-setup`, cf. 2.10)** : plutôt qu'un 2ᵉ marqueur ArUco
-sur le BB, le centre du BB est estimé par fit de cercle (Kåsa) sur la trajectoire de la cheville sur
-l'ensemble de la vidéo — un seul marqueur (calibration mm/px) suffit. Précision indicative ±20 mm,
-à valider au mètre ruban (critère de succès Phase 3A+ : ArUco ≈ ruban à ± 5 mm — pas encore atteint).
+**Approche intermédiaire (`measure-setup`, cf. 2.10)** : à défaut de marqueur BB détecté, le centre du
+BB est estimé par fit de cercle (Kåsa) sur la trajectoire de la cheville sur l'ensemble de la vidéo —
+un seul marqueur (calibration mm/px) suffit. Précision indicative ±20 mm.
 
-**À venir (Phase 3A+) :**
-- 2ᵉ marqueur ArUco (ID=1) positionné sur le BB, pour une mesure plus précise que le fit de cercle.
-- Remplissage automatique de `BikeSetup` avec validation ± 5 mm — plus besoin de mètre ruban.
-- Calibration personnalisée des coefficients de sensibilité (°/mm) à partir des sessions réelles.
+**Phase 3A+ — mesure automatique du vélo (2ᵉ marqueur BB) :**
+- `detect_marker_size_px`/`detect_marker_center_px` (`calibration/aruco.py`) filtrent désormais par
+  `marker_id` — indispensable dès que 2 marqueurs cohabitent dans le champ (ID=0 calibration, ID=1 BB),
+  sans quoi le premier marqueur renvoyé par OpenCV est arbitraire. `calibrate_from_video` calibre
+  explicitement sur l'ID=0 (n'est plus contaminé par l'ID=1 s'il est visible).
+- `locate_marker_in_video(video_path, marker_id, sample_every=10)` → `MarkerPosition | None` : position
+  pixel médiane d'un marqueur fixe (robuste aux occlusions passagères, ex. pied devant le BB).
+- `measure-setup` (CLI) cherche automatiquement le marqueur BB (ID=1) ; s'il est détecté de façon fiable
+  (≥ 50 % des frames échantillonnées, ≥ 5 détections), `estimate_bike_setup` l'utilise directement comme
+  BB (±5 mm annoncé) au lieu du fit de cercle (±20 mm) — repli automatique et transparent si absent.
+  Le rayon cheville (crank + hauteur chaussure) est alors calculé par rapport à ce BB réel, pas au
+  centre du cercle de Kåsa.
+- Testé sur frames/vidéos ArUco synthétiques (`tests/test_aruco.py`, `tests/test_measure_setup.py`) —
+  **critère de succès ArUco ≈ ruban à ± 5 mm pas encore validé sur capture réelle** (marqueur ID=1
+  physiquement collé, validation au mètre ruban à faire).
+- **Reste à faire** : calibration personnalisée des coefficients de sensibilité (°/mm) à partir de
+  sessions réelles avant/après réglage — bloqué tant que `setup_actuel` n'a pas de première mesure de
+  référence (voir doc procédure de mesures).
 
 ### 2.4 Module Analyse cinématique — ✅ implémenté
 - **Filtrage** : `filter_landmarks` — interpolation linéaire sur les gaps NaN, puis Savitzky-Golay (polyorder=3, fenêtre ≈ fps/5). NaN restaurés pour les frames non détectées.
@@ -261,16 +274,23 @@ bikefit/
   cercle sur trajectoire cheville → BB), avec photo/frame annotée pour vérification visuelle.
 - **Lacune** : pas de tests dédiés dans `tests/`.
 
-### Phase 3A+ — Mesure automatique du vélo *(à faire)*
-- 2ᵉ marqueur ArUco (ID=1) positionné sur le BB, pour affiner l'estimation du BB au-delà du fit de
-  cercle déjà livré par `measure-setup` (approche intermédiaire à un seul marqueur, ±20 mm).
-- Calcul automatique depuis la vidéo :
-  - hauteur de selle (BB → marqueur selle / landmark hanche)
-  - reach (BB → extrémité des extensions)
-  - stack (BB → hauteur des pads)
-- Remplissage automatique de `BikeSetup` avec validation ± 5 mm — plus besoin de mètre ruban.
-- Calibration des coefficients de sensibilité à partir des sessions réelles (avant/après réglage connu).
-- **Prérequis** : imprimer et coller les marqueurs ArUco ID=0 (calibration) et ID=1 (BB).
+### Phase 3A+ — Mesure automatique du vélo *(BB par marqueur livré, validation réelle à faire)*
+- 2ᵉ marqueur ArUco (ID=1) sur le BB : `locate_marker_in_video` le localise (position pixel médiane,
+  robuste aux occlusions), `estimate_bike_setup` l'utilise comme centre BB à la place du fit de cercle
+  quand il est détecté de façon fiable (repli automatique sinon — approche intermédiaire à un seul
+  marqueur, ±20 mm, conservée comme filet de sécurité).
+- Calcul automatique depuis la vidéo, relatif à ce BB :
+  - hauteur de selle (BB → hanche au PMB)
+  - reach (BB → poignet médian, horizontal)
+  - hauteur guidon / stack (BB → poignet médian, vertical)
+- CLI `measure-setup` : détection + bascule automatiques, message de précision (±5 mm marqueur /
+  ±20 mm cercle) affiché à l'utilisateur.
+- Testé sur frames/vidéos ArUco synthétiques uniquement pour l'instant.
+- **Reste à faire** :
+  - valider sur vidéo réelle (marqueur ID=1 collé) que ArUco ≈ ruban à ± 5 mm (critère de succès non
+    encore vérifié en conditions réelles) ;
+  - calibration des coefficients de sensibilité à partir des sessions réelles (avant/après réglage
+    connu) — bloqué tant qu'une première mesure de référence n'existe pas.
 
 ### Phase 3C — Vue de face ✅
 - Flux MJPEG HTTP (ESP32-CAM) dans `VideoReader` (parsing manuel SOI/EOI), firmware Arduino

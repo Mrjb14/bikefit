@@ -66,9 +66,13 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   rétrocompatible avec les sessions déjà enregistrées.
   `FitMetrics` porte des champs optionnels `calibration: CalibrationResult | None` et plan frontal
   (`genou_deviation_gauche/droit`, `largeur_coudes`).
-- `calibration/` : `detect_marker_size_px` (frame unique) + `calibrate_from_video` (vidéo entière,
-  médiane sur frames échantillonnées) → `CalibrationResult(mm_per_pixel, n_detected, n_sampled, is_reliable)`.
-  Dictionnaire ArUco : `DICT_4X4_50`. Marqueur ID=0.
+- `calibration/` : `detect_marker_size_px`/`detect_marker_center_px` (frame unique, filtrables par
+  `marker_id` — indispensable dès que plusieurs marqueurs cohabitent dans le champ) + `calibrate_from_video`
+  (vidéo entière, calibre explicitement sur l'ID=0, médiane sur frames échantillonnées) →
+  `CalibrationResult(mm_per_pixel, n_detected, n_sampled, is_reliable)` ; `locate_marker_in_video`
+  (Phase 3A+, marqueur fixe ex. BB) → `MarkerPosition(x_px, y_px, n_detected, n_sampled, is_reliable)`,
+  position médiane robuste aux occlusions. Dictionnaire ArUco : `DICT_4X4_50`. Marqueur ID=0 (calibration),
+  ID=1 (BB, Phase 3A+).
 - `equipment/` : modèles Pydantic `BikeProfile` / `BikeSetup` / `PlagesReglage`, `load_bike_profile(name)`.
 - `recommend/` : `run(metrics, bike, profile)` → `FitReport` + `Recommendation` (règles explicites, pas de ML).
   Cibles dans `config/targets_tt.yaml` (profils : `clm_court`, `clm_long`, `triathlon_XL`).
@@ -92,9 +96,10 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   Opérations : `save`, `get`, `list_all`, `latest`, `delete`. Tri par `date DESC, id DESC`.
 - `measure/` : bootstrap des YAML personnels (`config/rider/`, `config/bikes/`) depuis photo/vidéo.
   `estimate_body_measurements` (photo debout, MediaPipe IMAGE mode, world_landmarks 3D, mise à l'échelle
-  via ratio nez→cheville / taille) ; `estimate_bike_setup` (vidéo + calibration ArUco, fit de cercle de
-  Kåsa sur la trajectoire de la cheville → centre BB, puis `hauteur_selle_bb`/`hauteur_guidon_bb`/
-  `reach_prolongateurs` par projection sur BB) ; `update_null_fields` (yaml_io) réécrit uniquement les
+  via ratio nez→cheville / taille) ; `estimate_bike_setup` (vidéo + calibration ArUco, centre BB via
+  `bb_px` optionnel — marqueur ArUco ID=1 localisé par `locate_marker_in_video`, ±5 mm visé — sinon fit
+  de cercle de Kåsa sur la trajectoire de la cheville, ±20 mm ; puis `hauteur_selle_bb`/`hauteur_guidon_bb`/
+  `reach_prolongateurs` par projection sur ce BB) ; `update_null_fields` (yaml_io) réécrit uniquement les
   champs `null` d'un YAML existant, commentaires préservés. N'écrit jamais un champ déjà renseigné —
   les estimations sont un point de départ (±5-10 % corps, ±20 mm setup), à valider au mètre ruban.
   `render.py` : annotation visuelle OpenCV (squelette + crochets de cotation) sur la photo/frame PMB,
@@ -123,7 +128,12 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       (`render.py`) pour vérification visuelle. **Pas encore de tests dédiés** (`tests/` ne couvre pas
       `measure/`) — précision non validée face au mètre ruban (voir `docs/procedure-mesures.md`,
       critère de succès Phase 3A+ : ArUco ≈ ruban à ± 5 mm).
-- [ ] Phase 3A+ : 2ᵉ marqueur ArUco sur le BB → mesure automatique hauteur selle, reach, stack depuis la vidéo.
+- [x] Phase 3A+ (partiel) : 2ᵉ marqueur ArUco (ID=1) sur le BB → `locate_marker_in_video` le localise,
+      `estimate_bike_setup`/`measure-setup` l'utilisent comme BB (±5 mm visé) avec repli automatique sur
+      le fit de cercle (±20 mm) s'il n'est pas détecté de façon fiable. Testé sur ArUco synthétique
+      uniquement. **Reste à faire** : valider ArUco ≈ ruban à ± 5 mm sur vidéo réelle (marqueur ID=1
+      désormais collé sur le vélo) ; recalibration des coefficients de sensibilité à partir de sessions
+      réelles avant/après réglage (bloqué tant qu'une première mesure de référence n'existe pas).
 - [x] Phase 3C : vue de face câblée dans `analyze --front` (fichier ou flux MJPEG ESP32-CAM), métriques
       déviation genoux + largeur coudes (`kinematics/frontal.py`, testé sur données synthétiques :
       `tests/test_frontal.py`, `test_aggregate_frontal.py`, `test_ingest.py`), schéma vélo face dans le
@@ -154,7 +164,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (209 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco, recommandations,
+# Tests (224 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
 # storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML,
 # CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest

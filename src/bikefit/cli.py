@@ -19,6 +19,9 @@ app = typer.Typer(help="Analyse vidéo de position cycliste (CLM)")
 # ── Chemin de la base par défaut ──────────────────────────────────────────────
 _DB_DEFAULT = Path.home() / ".bikefit" / "sessions.db"
 
+# ── Marqueur ArUco collé sur le boîtier de pédalier (Phase 3A+) ──────────────
+_BB_MARKER_ID = 1
+
 # ── Noms des angles pour l'affichage ─────────────────────────────────────────
 _ANGLE_LABELS = {
     "genou_extension_pmb": "Genou ext. PMB",
@@ -644,7 +647,7 @@ def measure_setup(
 ) -> None:
     """Estime setup_actuel (hauteur selle, guidon, reach) depuis la vidéo + ArUco."""
     from bikefit._paths import ANNOTATED_DIR, CONFIG_DIR
-    from bikefit.calibration import calibrate_from_video
+    from bikefit.calibration import calibrate_from_video, locate_marker_in_video
     from bikefit.ingest import VideoReader
     from bikefit.measure.setup import estimate_bike_setup
     from bikefit.measure.yaml_io import update_null_fields
@@ -689,14 +692,33 @@ def measure_setup(
         f" ({calib.n_detected}/{calib.n_sampled} frames)"
     )
 
+    # ── BB : marqueur ArUco (ID=1) s'il est collé, sinon fit de cercle ────────
+    typer.echo(f"Recherche du marqueur BB (ID={_BB_MARKER_ID})...")
+    bb_marker = locate_marker_in_video(str(video), marker_id=_BB_MARKER_ID)
+    bb_px: tuple[float, float] | None = None
+    if bb_marker is not None and bb_marker.is_reliable:
+        bb_px = (bb_marker.x_px, bb_marker.y_px)
+        precision_mm = 5
+        typer.echo(
+            f"  Marqueur BB détecté ({bb_marker.n_detected}/{bb_marker.n_sampled} frames)"
+            f" -> BB localisé précisément (±{precision_mm} mm)."
+        )
+    else:
+        precision_mm = 20
+        typer.echo(
+            f"  Marqueur BB (ID={_BB_MARKER_ID}) non détecté ou peu fiable"
+            " -> BB estimé par fit de cercle sur la trajectoire de cheville"
+            f" (±{precision_mm} mm)."
+        )
+
     # ── Estimation du setup ───────────────────────────────────────────────────
-    typer.echo("Estimation du setup vélo (fit de cercle sur trajectoire cheville)...")
     estimates = estimate_bike_setup(
         df,
         mm_per_pixel=calib.mm_per_pixel,
         image_width=reader.width,
         image_height=reader.height,
         side=filmed_side,
+        bb_px=bb_px,
     )
 
     # ── Annotation visuelle (avant de popper les clés de debug) ──────────────
@@ -725,7 +747,7 @@ def measure_setup(
     typer.echo(f"  BB estimé : pixel ({bb_px[0]}, {bb_px[1]})")
     typer.echo(f"  Rayon cheville ≈ {rayon} mm (manivelle + hauteur chaussure)")
 
-    typer.echo("\nEstimations setup_actuel (mm) — précision indicative ±20 mm :")
+    typer.echo(f"\nEstimations setup_actuel (mm) — précision indicative ±{precision_mm} mm :")
     display = {k: v for k, v in estimates.items() if v is not None}
     for key, val in display.items():
         typer.echo(f"  {key:<24} {val:>5} mm")

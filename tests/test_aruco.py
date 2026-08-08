@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from bikefit.calibration.aruco import calibrate_from_frames, detect_marker_size_px
-from bikefit.calibration.models import CalibrationResult
+from bikefit.calibration.aruco import (
+    calibrate_from_frames,
+    detect_marker_center_px,
+    detect_marker_size_px,
+    locate_marker_in_video,
+)
+from bikefit.calibration.models import CalibrationResult, MarkerPosition
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -31,6 +38,23 @@ def _make_marker_frame(
 
 def _make_blank_frame(canvas_size: int = 640) -> np.ndarray:
     return np.full((canvas_size, canvas_size, 3), 200, dtype=np.uint8)
+
+
+def _make_multi_marker_frame(
+    width: int,
+    height: int,
+    markers: list[tuple[int, int, tuple[int, int]]],
+) -> np.ndarray:
+    """Frame BGR avec plusieurs marqueurs ArUco : (id, taille_px, centre_xy)."""
+    import cv2
+
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    canvas = np.full((height, width), 255, dtype=np.uint8)
+    for marker_id, side_px, (cx, cy) in markers:
+        marker_img = cv2.aruco.generateImageMarker(aruco_dict, marker_id, side_px)
+        x0, y0 = cx - side_px // 2, cy - side_px // 2
+        canvas[y0 : y0 + side_px, x0 : x0 + side_px] = marker_img
+    return cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
 
 
 # ── Tests detect_marker_size_px ───────────────────────────────────────────────
@@ -58,6 +82,39 @@ class TestDetectMarkerSizePx:
         for mid in (0, 5, 10, 20):
             frame = _make_marker_frame(marker_id=mid)
             assert detect_marker_size_px(frame) is not None
+
+    def test_filters_by_marker_id_among_multiple(self) -> None:
+        # ID=0 (calibration, 200 px) et ID=1 (BB, 100 px) dans le même champ :
+        # sans filtrage, laquelle des deux tailles serait renvoyée est arbitraire.
+        frame = _make_multi_marker_frame(
+            640, 640, markers=[(0, 200, (200, 200)), (1, 100, (450, 450))]
+        )
+        size0 = detect_marker_size_px(frame, marker_id=0)
+        size1 = detect_marker_size_px(frame, marker_id=1)
+        assert size0 is not None
+        assert abs(size0 - 200) < 10
+        assert size1 is not None
+        assert abs(size1 - 100) < 8
+
+    def test_returns_none_for_absent_marker_id(self) -> None:
+        frame = _make_marker_frame(marker_id=0)
+        assert detect_marker_size_px(frame, marker_id=1) is None
+
+
+class TestDetectMarkerCenterPx:
+    def test_detects_center_of_specific_marker(self) -> None:
+        frame = _make_multi_marker_frame(
+            640, 640, markers=[(0, 200, (200, 200)), (1, 120, (450, 400))]
+        )
+        center = detect_marker_center_px(frame, marker_id=1)
+        assert center is not None
+        cx, cy = center
+        assert abs(cx - 450) < 5
+        assert abs(cy - 400) < 5
+
+    def test_returns_none_when_marker_absent(self) -> None:
+        frame = _make_marker_frame(marker_id=0)
+        assert detect_marker_center_px(frame, marker_id=1) is None
 
 
 # ── Tests calibrate_from_frames ───────────────────────────────────────────────
@@ -119,6 +176,87 @@ class TestCalibrateFromFrames:
         result = calibrate_from_frames(frames, marker_size_mm=100.0, sample_every=1)
         assert result is not None
         assert not result.is_reliable
+
+    def test_ignores_other_marker_id_in_same_frame(self) -> None:
+        # ID=0 (calibration, 200 px = 100 mm -> 0.5 mm/px) et ID=1 (BB, 80 px) :
+        # sans filtrage par marker_id, la calibration pourrait se faire sur le
+        # mauvais marqueur et fausser mm_per_pixel.
+        frames = [
+            _make_multi_marker_frame(640, 640, markers=[(0, 200, (150, 150)), (1, 80, (450, 450))])
+        ] * 5
+        result = calibrate_from_frames(frames, marker_size_mm=100.0, sample_every=1)
+        assert result is not None
+        assert pytest.approx(result.mm_per_pixel, rel=0.05) == 0.5
+
+
+# ── Tests locate_marker_in_video ────────────────────────────────────────────────
+
+
+class TestLocateMarkerInVideo:
+    def test_locates_stationary_marker(self, tmp_path: Path) -> None:
+        import cv2
+
+        path = tmp_path / "bb_marker.mp4"
+        w, h = 640, 480
+        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (w, h))
+        frame = _make_multi_marker_frame(w, h, markers=[(1, 100, (400, 300))])
+        for _ in range(15):
+            writer.write(frame)
+        writer.release()
+
+        result = locate_marker_in_video(str(path), marker_id=1, sample_every=1)
+        assert result is not None
+        assert abs(result.x_px - 400) < 5
+        assert abs(result.y_px - 300) < 5
+        assert result.n_sampled == 15
+        assert result.is_reliable
+
+    def test_returns_none_when_marker_never_detected(self, tmp_path: Path) -> None:
+        import cv2
+
+        path = tmp_path / "blank.mp4"
+        w, h = 320, 240
+        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (w, h))
+        frame = np.full((h, w, 3), 200, dtype=np.uint8)
+        for _ in range(5):
+            writer.write(frame)
+        writer.release()
+
+        assert locate_marker_in_video(str(path), marker_id=1, sample_every=1) is None
+
+    def test_robust_to_occlusion(self, tmp_path: Path) -> None:
+        # Quelques frames sans le marqueur (occlusion par le pied/la manivelle)
+        # ne doivent pas empêcher la localisation.
+        import cv2
+
+        path = tmp_path / "occluded.mp4"
+        w, h = 640, 480
+        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (w, h))
+        marker_frame = _make_multi_marker_frame(w, h, markers=[(1, 100, (400, 300))])
+        blank_frame = np.full((h, w, 3), 200, dtype=np.uint8)
+        for i in range(20):
+            writer.write(blank_frame if i % 5 == 0 else marker_frame)
+        writer.release()
+
+        result = locate_marker_in_video(str(path), marker_id=1, sample_every=1)
+        assert result is not None
+        assert abs(result.x_px - 400) < 5
+        assert result.n_sampled == 20
+        assert result.n_detected == 16
+
+
+class TestMarkerPosition:
+    def test_pydantic_roundtrip(self) -> None:
+        p = MarkerPosition(x_px=400.0, y_px=300.0, n_detected=8, n_sampled=10)
+        assert MarkerPosition(**p.model_dump()) == p
+
+    def test_is_reliable_enough_detections(self) -> None:
+        p = MarkerPosition(x_px=0.0, y_px=0.0, n_detected=8, n_sampled=10)
+        assert p.is_reliable
+
+    def test_is_not_reliable_too_few(self) -> None:
+        p = MarkerPosition(x_px=0.0, y_px=0.0, n_detected=2, n_sampled=20)
+        assert not p.is_reliable
 
 
 # ── Tests CalibrationResult ───────────────────────────────────────────────────
