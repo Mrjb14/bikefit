@@ -13,7 +13,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `config/bikes/giant_trinity_2019.yaml` : fiche du vélo cible (Giant Trinity Advanced Pro 2, 2019, M).
 - `config/rider/mensurations.yaml` : mensurations personnelles + objectif (Ironman 2027-05-21).
 - `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, Tasks API MediaPipe v1.0).
-- `docs/aruco_marker_100mm.png` : marqueur ArUco à imprimer (DICT_4X4_50 ID=0, 100 mm).
+- `docs/aruco_marker_100mm.png` : marqueur ArUco de calibration à imprimer (DICT_4X4_50 ID=0, 100 mm).
+- `docs/aruco_marker_id1_100mm.png` : marqueur ArUco BB à imprimer (DICT_4X4_50 ID=1, 100 mm, Phase 3A+).
 - `firmware/README.md` : installation du firmware ESP32-CAM (flux MJPEG, vue de face Phase 3C).
 - `data/` : données locales, **entièrement gitignoré**. Séparation stricte entrées/sorties :
   - `data/sources/` : vidéos et photos d'entrée (les seuls fichiers non regénérables).
@@ -250,5 +251,8 @@ Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR
   (`webcam:<index>`) — vue de profil et vue de face acceptent les trois indifféremment, avec une
   vérification au lancement qu'elles ne pointent pas vers la même source.
 - Vidéos non versionnées (trop volumineuses) — dans `data/sources/`, gitignorées.
-- Marqueur ArUco : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal côté caméra.
-  Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.
+- Marqueur ArUco de calibration : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal
+  côté caméra. Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.
+- Marqueur ArUco BB (Phase 3A+) : `DICT_4X4_50 ID=1`, 100 mm, collé sur le boîtier de pédalier, déjà en
+  place. Fichier prêt à imprimer : `docs/aruco_marker_id1_100mm.png`. Utilisé par `measure-setup` pour
+  localiser le BB précisément (±5 mm visé) — validation ruban sur capture réelle encore à faire.

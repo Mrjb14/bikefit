@@ -183,7 +183,8 @@ bikefit/
 ├── docs/
 │   ├── plan-developpement.md     # ce fichier
 │   ├── procedure-mesures.md      # procédure de prise de mesures + validation ruban
-│   └── aruco_marker_100mm.png    # marqueur à imprimer (DICT_4X4_50 ID=0)
+│   ├── aruco_marker_100mm.png    # marqueur calibration à imprimer (DICT_4X4_50 ID=0)
+│   └── aruco_marker_id1_100mm.png # marqueur BB à imprimer (DICT_4X4_50 ID=1, Phase 3A+)
 ├── firmware/
 │   ├── README.md                 # installation/flash ESP32-CAM
 │   └── esp32cam_mjpeg/           # sketch Arduino, serveur MJPEG HTTP (vue de face)
