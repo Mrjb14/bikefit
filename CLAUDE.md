@@ -181,8 +181,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (224 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
-# storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML,
+# Tests (234 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
+# storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML, UI helpers,
 # CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
 

@@ -104,6 +104,10 @@ python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side 
 
 # Si cohérent, écriture dans le YAML
 python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side right --write
+
+# Avec découpage (ignorer montée/descente, comme --start/--end sur analyze) — recommandé,
+# la montée/descente peut faire perdre le marqueur BB ou fausser le fit de cercle
+python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side right --start 20 --end 70 --write
 ```
 
 La commande recherche automatiquement le marqueur BB (ID=1) et affiche la méthode utilisée :
@@ -135,6 +139,19 @@ Confirmer avec la mesure ruban ci-dessous.
 
 **Précision attendue :** ±5 mm avec marqueur BB détecté de façon fiable, ±20 mm en repli (fit de
 cercle) — dans les deux cas, validation ruban obligatoire avant de considérer la mesure comme fiable.
+
+**Dépannage — pointage manuel du BB (`--bb-px`) :**
+Si le marqueur ID=1 n'est pas détecté de façon fiable (mal collé, masqué trop souvent, mauvais
+éclairage) et que le fit de cercle (±20 mm) est insuffisant, il est possible de pointer le pixel du
+BB à la main (résolution vidéo originale, caméra fixe obligatoire) :
+
+```bash
+python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side right --bb-px 812,540
+```
+
+`--bb-px` est prioritaire sur le marqueur ArUco et le fit de cercle — précision indicative ±10 mm
+(dépend de la précision du pointage). Utile aussi pour valider/comparer les deux autres méthodes sur
+une même vidéo.
 
 ---
 

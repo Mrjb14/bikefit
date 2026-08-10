@@ -156,11 +156,17 @@ Options:
   --bike TEXT           Fiche vélo dans config/bikes/ (défaut: giant_trinity_2019)
   --write               Met à jour les champs null du YAML
   --no-cache            Force le recalcul des landmarks MediaPipe
+  --start FLOAT         Ignore les N premières secondes (montée sur le vélo)
+  --end FLOAT           Ignore la vidéo au-delà de N secondes (descente du vélo)
+  --bb-px TEXT          Pixel BB pointé manuellement "x,y" (dépannage — prioritaire sur le
+                        marqueur ArUco et le fit de cercle, précision indicative ±10 mm)
 ```
 
-Calibre via ArUco puis estime le centre du boîtier de pédalier (fit de cercle sur la trajectoire
-de la cheville) pour en déduire `hauteur_selle_bb`, `hauteur_guidon_bb`, `reach_prolongateurs`.
-Précision indicative ±20 mm — validation au mètre ruban obligatoire avant usage.
+Calibre via ArUco puis localise le centre du boîtier de pédalier — via le marqueur ArUco ID=1
+collé sur le BB si détecté de façon fiable (±5 mm visé), sinon par fit de cercle sur la
+trajectoire de la cheville (±20 mm, repli automatique) — pour en déduire `hauteur_selle_bb`,
+`hauteur_guidon_bb`, `reach_prolongateurs`. Validation au mètre ruban obligatoire avant usage
+(voir [`docs/procedure-mesures.md`](docs/procedure-mesures.md)).
 
 ## Calibration ArUco (optionnelle)
 
@@ -242,6 +248,17 @@ Deux comportements selon la source, documentés pour éviter toute confusion :
   calculés **frame par frame, bruts** (sans lissage, qui nécessite l'ensemble de la capture) — normal
   de les voir plus "nerveux" que sur un rapport final.
 
+## Interface web (Streamlit, Phase 4 — MVP)
+
+Alternative au CLI pour lancer une analyse depuis le navigateur : upload vidéo(s), formulaire de
+config, rapport HTML + recommandations affichés à la fin. Réutilise `cli.analyze` directement (même
+pipeline, aucune logique dupliquée) — `measure-body`/`measure-setup`, historique et comparaison de
+sessions restent CLI-only pour l'instant.
+
+```bash
+uv run streamlit run src/bikefit/ui/app.py
+```
+
 ## Structure du projet
 
 ```
@@ -253,7 +270,8 @@ bikefit/
 ├── docs/
 │   ├── plan-developpement.md
 │   ├── procedure-mesures.md     # procédure de prise de mesures + validation ruban
-│   └── aruco_marker_100mm.png   # marqueur à imprimer (100 mm, DICT_4X4_50 ID=0)
+│   ├── aruco_marker_100mm.png   # marqueur calibration à imprimer (100 mm, DICT_4X4_50 ID=0)
+│   └── aruco_marker_id1_100mm.png # marqueur BB à imprimer (100 mm, DICT_4X4_50 ID=1, Phase 3A+)
 ├── firmware/
 │   ├── README.md                # installation/flash ESP32-CAM
 │   └── esp32cam_mjpeg/          # sketch Arduino, serveur MJPEG HTTP (vue de face)
@@ -273,6 +291,7 @@ bikefit/
     ├── storage/                 # Session + SessionStore (SQLite)
     ├── measure/                 # Bootstrap YAML : mensurations (photo) + setup vélo (vidéo/ArUco) + annotation visuelle
     ├── debug/                   # Vidéo de debug annotée (squelette + HUD d'angles), toute source
+    ├── ui/                      # UI Streamlit (Phase 4, MVP) — formulaire → cli.analyze → rapport
     └── cli.py                   # Typer — analyze (--front, --debug-video) / history / compare / measure-*
 ```
 
@@ -282,9 +301,10 @@ téléchargé au premier lancement), `cache/landmarks/` (Parquet par vidéo) et 
 ## Tests
 
 ```bash
-python -m pytest        # 198 tests — angles, filtre SG, cycles, visibilité/fiabilité, ArUco,
-                         # recommandations, storage, plan frontal, ingest MJPEG/webcam, measure/,
-                         # report HTML, CLI, vidéo de debug (données synthétiques)
+python -m pytest        # 234 tests — angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité,
+                         # ArUco (+ multi-marqueur), recommandations, storage, plan frontal,
+                         # ingest MJPEG/webcam, measure/, report HTML, UI helpers, CLI,
+                         # vidéo de debug (données synthétiques)
 uv run mypy src
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
@@ -307,16 +327,22 @@ révéler les bugs d'encodage console et de séparateurs de chemin. Couverture m
 - [x] Phase 3A — calibration ArUco : `mm_per_pixel` détecté, stocké en session *(marqueur non encore imprimé)*
 - [x] Phase 3B — sessions SQLite : `history`, `compare`, `--save-session`
 - [x] `measure/` — bootstrap `measure-body`/`measure-setup` (mensurations + setup vélo, photo/vidéo annotée)
-- [ ] Phase 3A+ — mesure automatique du vélo (BB → selle, reach, stack) via 2ᵉ marqueur ArUco
+- [x] Phase 3A+ — mesure automatique du vélo (BB → selle, reach, stack) via 2ᵉ marqueur ArUco (ID=1),
+      repli automatique sur fit de cercle si non détecté, `--bb-px` pour pointage manuel de dépannage
+      *(implémenté, validation ArUco ≈ ruban ± 5 mm sur capture réelle encore à faire)*
 - [x] Phase 3C — vue de face (`--front`, fichier ou flux MJPEG ESP32-CAM) : déviation genoux, largeur coudes, firmware ESP32-CAM
 - [x] Vue de profil en flux réseau/webcam (symétrique à `--front`) + garde anti-double-source
 - [x] Vidéo de debug (`--debug-video`/`--front-debug-video`) : squelette + angles superposés, toute source
 - [x] Découpage `--start`/`--end` — exclut la montée/descente du vélo, appliqué après le cache
+      (aussi sur `measure-setup`)
 - [x] Fiabilité des mesures — les landmarks *inférés* par MediaPipe sont exclus des angles, et chaque
       métrique porte sa visibilité + son taux de frames exploitées (voir ci-dessous)
-- [ ] Filtre de plausibilité sur la durée des cycles — un faux PMB fait encore passer l'écart-type
+- [x] Filtre de plausibilité sur la durée des cycles — rejette tout cycle s'écartant de plus de 35%
+      de la médiane (à partir de 3 cycles détectés), corrige le faux PMB qui faisait passer l'écart-type
       du genou de 2,2° à 9,8°
-- [ ] Phase 4 — UI Streamlit (optionnel)
+- [x] Phase 4 (MVP) — UI Streamlit (`src/bikefit/ui/`) : upload + formulaire → `cli.analyze` → rapport
+      HTML affiché dans le navigateur. `measure-body`/`measure-setup`, historique et comparaison
+      restent CLI-only pour l'instant.
 
 ## Fiabilité des mesures
 

@@ -228,11 +228,16 @@ bikefit/
     ├── storage/
     │   ├── models.py             # Session (Pydantic)
     │   └── store.py              # SessionStore (sqlite3)
-    └── measure/
-        ├── body.py               # estimate_body_measurements (photo → mensurations)
-        ├── setup.py              # estimate_bike_setup (vidéo + ArUco → setup vélo)
-        ├── render.py             # annotation visuelle OpenCV (vérification avant --write)
-        └── yaml_io.py            # update_null_fields (écrit uniquement les champs null)
+    ├── measure/
+    │   ├── body.py               # estimate_body_measurements (photo → mensurations)
+    │   ├── setup.py              # estimate_bike_setup (vidéo + ArUco → setup vélo)
+    │   ├── render.py             # annotation visuelle OpenCV (vérification avant --write)
+    │   └── yaml_io.py            # update_null_fields (écrit uniquement les champs null)
+    ├── debug/
+    │   └── video.py              # DebugVideoWriter, render_debug_video_from_landmarks/_live
+    └── ui/                       # Phase 4 (MVP) — app Streamlit
+        ├── app.py                # formulaire (upload, config) → cli.analyze → rapport affiché
+        └── helpers.py            # logique pure (parsing, listing configs, save upload), testée
 ```
 
 ---
