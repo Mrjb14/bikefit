@@ -19,6 +19,9 @@ app = typer.Typer(help="Analyse vidéo de position cycliste (CLM)")
 # ── Chemin de la base par défaut ──────────────────────────────────────────────
 _DB_DEFAULT = Path.home() / ".bikefit" / "sessions.db"
 
+# ── Marqueur ArUco collé sur le boîtier de pédalier (Phase 3A+) ──────────────
+_BB_MARKER_ID = 1
+
 # ── Noms des angles pour l'affichage ─────────────────────────────────────────
 _ANGLE_LABELS = {
     "genou_extension_pmb": "Genou ext. PMB",
@@ -641,10 +644,26 @@ def measure_setup(
     bike: Annotated[str, typer.Option(help="Fiche vélo dans config/bikes/")] = "giant_trinity_2019",
     write: Annotated[bool, typer.Option(help="Met à jour les champs null dans le YAML")] = False,
     no_cache: Annotated[bool, typer.Option(help="Force le recalcul des landmarks")] = False,
+    start: Annotated[
+        float | None,
+        typer.Option(help="Ignore les N premières secondes (montée sur le vélo)"),
+    ] = None,
+    end: Annotated[
+        float | None,
+        typer.Option(help="Ignore la vidéo au-delà de N secondes (descente du vélo)"),
+    ] = None,
+    bb_px_arg: Annotated[
+        str | None,
+        typer.Option(
+            "--bb-px",
+            help="Pixel BB pointé manuellement 'x,y' (résolution vidéo originale)."
+            " Caméra fixe requise. Prioritaire sur le marqueur ArUco et le fit de cercle.",
+        ),
+    ] = None,
 ) -> None:
     """Estime setup_actuel (hauteur selle, guidon, reach) depuis la vidéo + ArUco."""
     from bikefit._paths import ANNOTATED_DIR, CONFIG_DIR
-    from bikefit.calibration import calibrate_from_video
+    from bikefit.calibration import calibrate_from_video, locate_marker_in_video
     from bikefit.ingest import VideoReader
     from bikefit.measure.setup import estimate_bike_setup
     from bikefit.measure.yaml_io import update_null_fields
@@ -675,6 +694,8 @@ def measure_setup(
     with MediaPipePoseEstimator() as estimator:
         df = cache.get_or_compute(video, reader, estimator)
 
+    df = _trim_landmarks(df, reader.fps, start, end, "profil")
+
     typer.echo(f"Détection pose : {df['detected'].mean():.1%} des frames")
 
     # ── Calibration ArUco ─────────────────────────────────────────────────────
@@ -689,14 +710,44 @@ def measure_setup(
         f" ({calib.n_detected}/{calib.n_sampled} frames)"
     )
 
+    # ── BB : pixel manuel > marqueur ArUco (ID=1) > fit de cercle ─────────────
+    bb_px: tuple[float, float] | None = None
+    precision_mm: int
+    if bb_px_arg is not None:
+        try:
+            x_str, y_str = bb_px_arg.split(",")
+            bb_px = (float(x_str), float(y_str))
+        except ValueError as exc:
+            typer.echo(f"Erreur : --bb-px doit être 'x,y' (reçu {bb_px_arg!r}).", err=True)
+            raise typer.Exit(1) from exc
+        precision_mm = 10
+        typer.echo(f"BB pointé manuellement : pixel {bb_px} (±{precision_mm} mm indicatif).")
+    else:
+        typer.echo(f"Recherche du marqueur BB (ID={_BB_MARKER_ID})...")
+        bb_marker = locate_marker_in_video(str(video), marker_id=_BB_MARKER_ID)
+        if bb_marker is not None and bb_marker.is_reliable:
+            bb_px = (bb_marker.x_px, bb_marker.y_px)
+            precision_mm = 5
+            typer.echo(
+                f"  Marqueur BB détecté ({bb_marker.n_detected}/{bb_marker.n_sampled} frames)"
+                f" -> BB localisé précisément (±{precision_mm} mm)."
+            )
+        else:
+            precision_mm = 20
+            typer.echo(
+                f"  Marqueur BB (ID={_BB_MARKER_ID}) non détecté ou peu fiable"
+                " -> BB estimé par fit de cercle sur la trajectoire de cheville"
+                f" (±{precision_mm} mm)."
+            )
+
     # ── Estimation du setup ───────────────────────────────────────────────────
-    typer.echo("Estimation du setup vélo (fit de cercle sur trajectoire cheville)...")
     estimates = estimate_bike_setup(
         df,
         mm_per_pixel=calib.mm_per_pixel,
         image_width=reader.width,
         image_height=reader.height,
         side=filmed_side,
+        bb_px=bb_px,
     )
 
     # ── Annotation visuelle (avant de popper les clés de debug) ──────────────
@@ -723,16 +774,16 @@ def measure_setup(
     bb_px = estimates.pop("_bb_px")
     rayon = estimates.pop("_rayon_cheville_mm")
     typer.echo(f"  BB estimé : pixel ({bb_px[0]}, {bb_px[1]})")
-    typer.echo(f"  Rayon cheville ≈ {rayon} mm (manivelle + hauteur chaussure)")
+    typer.echo(f"  Rayon cheville ~= {rayon} mm (manivelle + hauteur chaussure)")
 
-    typer.echo("\nEstimations setup_actuel (mm) — précision indicative ±20 mm :")
+    typer.echo(f"\nEstimations setup_actuel (mm) — précision indicative ±{precision_mm} mm :")
     display = {k: v for k, v in estimates.items() if v is not None}
     for key, val in display.items():
         typer.echo(f"  {key:<24} {val:>5} mm")
 
     typer.echo(
-        "\nNote : hauteur_selle_bb = BB → hanche au PMB (hanche ≠ sommet selle,"
-        " écart ≈ 30-50 mm selon selle/cuissard)."
+        "\nNote : hauteur_selle_bb = BB -> hanche au PMB (hanche != sommet selle,"
+        " écart ~= 30-50 mm selon selle/cuissard)."
     )
 
     if write:

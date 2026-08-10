@@ -139,3 +139,48 @@ class TestEstimateBikeSetup:
         df = _setup_df(n=5)
         with pytest.raises(ValueError, match="insuffisamment"):
             estimate_bike_setup(df, mm_per_pixel=1.0, image_width=_W, image_height=_H)
+
+
+class TestEstimateBikeSetupWithMarkerBB:
+    """BB fourni par un marqueur ArUco (Phase 3A+) : prime sur le fit de cercle."""
+
+    def test_uses_provided_bb_over_circle_fit(self) -> None:
+        # Cercle centré en (500, 700) mais marqueur BB à (510, 690) : c'est ce
+        # dernier qui doit être utilisé.
+        out = estimate_bike_setup(
+            _setup_df(),
+            mm_per_pixel=1.0,
+            image_width=_W,
+            image_height=_H,
+            bb_px=(510.0, 690.0),
+        )
+        assert out["_bb_px"] == (510, 690)
+
+    def test_saddle_height_uses_marker_bb(self) -> None:
+        # BB (marqueur) à y=690, hanche à y=300 -> 390 px, pas 400 (cercle)
+        out = estimate_bike_setup(
+            _setup_df(),
+            mm_per_pixel=1.0,
+            image_width=_W,
+            image_height=_H,
+            bb_px=(510.0, 690.0),
+        )
+        assert out["hauteur_selle_bb"] == pytest.approx(390, abs=2)
+
+    def test_radius_computed_from_marker_bb(self) -> None:
+        # Rayon = distance médiane cheville -> BB marqueur (150 px, comme le cercle
+        # généré), pas le rayon de Kåsa recalculé sur son propre centre.
+        out = estimate_bike_setup(
+            _setup_df(),
+            mm_per_pixel=1.0,
+            image_width=_W,
+            image_height=_H,
+            bb_px=(500.0, 700.0),
+        )
+        assert out["_rayon_cheville_mm"] == pytest.approx(150, abs=1)
+
+    def test_none_falls_back_to_circle_fit(self) -> None:
+        out = estimate_bike_setup(
+            _setup_df(), mm_per_pixel=1.0, image_width=_W, image_height=_H, bb_px=None
+        )
+        assert out["_bb_px"] == (500, 700)

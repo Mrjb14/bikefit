@@ -76,15 +76,25 @@ Mesurer pieds nus, debout sur une surface plane. Faire mesurer par une deuxième
 
 **Pré-requis :**
 
-1. Imprimer et coller le marqueur ArUco `docs/aruco_marker_100mm.png` sur le tube de selle ou le diagonal, côté caméra. La face imprimée doit être parfaitement plane (pas de plis).
-2. Vérifier que le marqueur mesure exactement **100 mm de côté** à l'impression (règle, pas « ajuster à la page »).
+1. Imprimer et coller le marqueur ArUco `docs/aruco_marker_100mm.png` (ID=0) sur le tube de selle ou
+   le diagonal, côté caméra. La face imprimée doit être parfaitement plane (pas de plis).
+2. Vérifier que le marqueur mesure exactement **100 mm de côté** à l'impression (règle, pas « ajuster
+   à la page »).
+3. **Recommandé (Phase 3A+)** : imprimer et coller un second marqueur ArUco `docs/aruco_marker_id1_100mm.png`
+   (ID=1) directement sur le boîtier de pédalier (BB), bien plan et visible caméra. S'il est détecté de
+   façon fiable, `measure-setup` l'utilise comme centre BB exact (±5 mm visé) au lieu d'estimer sa
+   position par fit de cercle sur la trajectoire de cheville (±20 mm, toujours utilisé en repli
+   automatique si ce marqueur est absent, mal collé ou masqué).
 
 **Conditions de tournage :**
 
 - Caméra perpendiculaire au plan de pédalage (vue strictement de profil).
-- Côté filmé visible : genou, cheville, hanche, poignet, marqueur ArUco dans le même plan.
+- Côté filmé visible : genou, cheville, hanche, poignet, les deux marqueurs ArUco dans le même plan.
 - Durée : au moins 60 secondes à rythme de pédalage stable (70–90 rpm).
 - La totalité du cycle de la cheville doit être visible (ne pas zoomer trop près).
+- Le marqueur BB (ID=1) doit rester visible sur la majorité de la vidéo — il sera occasionnellement
+  masqué par le pied/la manivelle en passant, ce qui est normal (position médiane sur les frames où il
+  est détecté).
 
 **Procédure :**
 
@@ -94,6 +104,20 @@ python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side 
 
 # Si cohérent, écriture dans le YAML
 python -m bikefit measure-setup data/sources/video.mp4 --marker-size 100 --side right --write
+```
+
+La commande recherche automatiquement le marqueur BB (ID=1) et affiche la méthode utilisée :
+
+```
+Recherche du marqueur BB (ID=1)...
+  Marqueur BB détecté (58/60 frames) -> BB localisé précisément (±5 mm).
+```
+
+ou, en son absence :
+
+```
+Recherche du marqueur BB (ID=1)...
+  Marqueur BB (ID=1) non détecté ou peu fiable -> BB estimé par fit de cercle sur la trajectoire de cheville (±20 mm).
 ```
 
 La frame annotée (trajectoire de la cheville, BB estimé, cotes) est écrite dans
@@ -109,7 +133,8 @@ hauteur_selle_bb_réelle ≈ hauteur_selle_bb_estimée − 40 mm  (valeur typiqu
 
 Confirmer avec la mesure ruban ci-dessous.
 
-**Précision attendue :** ±20 mm — point de départ, validation ruban obligatoire.
+**Précision attendue :** ±5 mm avec marqueur BB détecté de façon fiable, ±20 mm en repli (fit de
+cercle) — dans les deux cas, validation ruban obligatoire avant de considérer la mesure comme fiable.
 
 ---
 
@@ -172,7 +197,9 @@ de prolongateurs de −48 mm à −111 mm.
 mesure concernée repose sur des positions devinées par MediaPipe — corriger le cadrage ou
 l'éclairage de la caméra avant d'exploiter ce chiffre.
 
-**Critère de succès Phase 3A+ :** mesure ArUco (`measure-setup`) ≈ mesure ruban à ± 5 mm.
+**Critère de succès Phase 3A+ :** mesure ArUco (`measure-setup`) ≈ mesure ruban à ± 5 mm — implémenté
+(marqueur BB ID=1) mais **pas encore validé sur capture réelle** ; à confirmer une fois le marqueur
+BB filmé et comparé au ruban.
 
 ---
 
@@ -182,7 +209,7 @@ l'éclairage de la caméra avant d'exploiter ce chiffre.
 # Mensurations corporelles depuis une photo debout
 python -m bikefit measure-body photo.jpg [--write]
 
-# Setup vélo depuis une vidéo avec marqueur ArUco
+# Setup vélo depuis une vidéo avec marqueur ArUco (BB via ID=1 si présent, sinon fit de cercle)
 python -m bikefit measure-setup video.mp4 --marker-size 100 [--side right] [--write]
 
 # Analyse complète + recommandations

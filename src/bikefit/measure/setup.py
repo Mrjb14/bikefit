@@ -26,12 +26,15 @@ def estimate_bike_setup(
     image_width: int,
     image_height: int,
     side: Side = "right",
+    bb_px: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """Estime setup_actuel depuis les landmarks de pose et la calibration mm/pixel.
 
     Principe :
-    - BB       : centre du cercle tracé par la cheville sur l'ensemble des frames
-                 (fit algébrique de Kåsa — robuste sur plusieurs dizaines de cycles)
+    - BB       : `bb_px` s'il est fourni (marqueur ArUco ID=1 collé sur le BB,
+                 Phase 3A+, précision visée ±5 mm) ; sinon centre du cercle tracé
+                 par la cheville sur l'ensemble des frames (fit algébrique de
+                 Kåsa — approche intermédiaire, ±20 mm).
     - hauteur_selle_bb   : distance verticale BB → hanche au PMB × mm/px
     - hauteur_guidon_bb  : distance verticale BB → poignet médian × mm/px
                            (positif si pads au-dessus du BB)
@@ -62,11 +65,20 @@ def estimate_bike_setup(
     if len(ankles) < 10:
         raise ValueError(f"Cheville insuffisamment détectée ({len(ankles)} frames < 10).")
 
-    # ── BB : centre du cercle des chevilles ──────────────────────────────────
-    bb_x, bb_y, radius_px = _fit_circle(
-        ankles[ax_col].to_numpy(),
-        ankles[ay_col].to_numpy(),
-    )
+    # ── BB : marqueur ArUco s'il est fourni, sinon centre du cercle des chevilles ──
+    if bb_px is not None:
+        bb_x, bb_y = bb_px
+        # Rayon = distance médiane cheville → BB réel (plus fiable que le rayon
+        # de Kåsa, qui minimise l'erreur radiale autour d'un centre qui lui est
+        # propre, pas forcément le vrai BB).
+        radius_px = float(
+            np.median(np.hypot(ankles[ax_col].to_numpy() - bb_x, ankles[ay_col].to_numpy() - bb_y))
+        )
+    else:
+        bb_x, bb_y, radius_px = _fit_circle(
+            ankles[ax_col].to_numpy(),
+            ankles[ay_col].to_numpy(),
+        )
 
     # ── Hauteur selle : BB → hanche au PMB ───────────────────────────────────
     hauteur_selle_bb: float | None = None
