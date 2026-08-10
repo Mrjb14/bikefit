@@ -138,8 +138,9 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - [x] Phase 3B : `storage/` — sessions SQLite, CLI `history` + `compare`, `--save-session`.
 - [x] `measure/` : bootstrap mensurations (`measure-body`) et setup vélo (`measure-setup`) — écrit les
       champs `null` de `config/rider/*.yaml` et `config/bikes/*.yaml`, avec photo/frame annotée
-      (`render.py`) pour vérification visuelle. **Pas encore de tests dédiés** (`tests/` ne couvre pas
-      `measure/`) — précision non validée face au mètre ruban (voir `docs/procedure-mesures.md`,
+      (`render.py`) pour vérification visuelle. Testé sur données synthétiques
+      (`tests/test_measure_body.py`, `tests/test_measure_setup.py`) — précision non encore validée
+      face au mètre ruban sur capture réelle (voir `docs/procedure-mesures.md`,
       critère de succès Phase 3A+ : ArUco ≈ ruban à ± 5 mm).
 - [x] Phase 3A+ (partiel) : 2ᵉ marqueur ArUco (ID=1) sur le BB → `locate_marker_in_video` le localise,
       `estimate_bike_setup`/`measure-setup` l'utilisent comme BB (±5 mm visé) avec repli automatique sur

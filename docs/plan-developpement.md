@@ -160,7 +160,7 @@ un seul marqueur (calibration mm/px) suffit. Précision indicative ±20 mm.
 | Rapport | Jinja2 → HTML, Plotly CDN | Export autonome, pas de dépendance serveur |
 | UI v2 | Streamlit (Phase 4, MVP fait) | Rapide à prototyper |
 | Tests | pytest, données synthétiques (NumPy + OpenCV) | Non-régression géométrie + ArUco + recommandations + plan frontal + ingest MJPEG |
-| CI | GitHub Actions — lint (ruff) + format + tests Python 3.11/3.12 | Feedback rapide. `mypy` est configuré (`pyproject.toml`) mais **pas encore branché en CI** — à ajouter ou retirer de `dev` pour éviter une fausse promesse de vérification de types. |
+| CI | GitHub Actions — lint (ruff) + format + mypy + tests (ubuntu 3.11/3.12, windows 3.12) | Feedback rapide, mypy bloquant comme ruff/tests |
 | Packaging | uv / pyproject.toml | Standard moderne |
 
 ---
