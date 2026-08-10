@@ -126,7 +126,8 @@ un seul marqueur (calibration mm/px) suffit. Précision indicative ±20 mm.
 - **v1 : CLI** (`python -m bikefit video.mp4 --side right`) — ✅ implémentée.
   5 commandes Typer : `analyze` (défaut, avec `--front` pour la vue de face), `history`, `compare`,
   `measure-body`, `measure-setup`.
-- **v2 : UI web locale** (Streamlit) — Phase 4 optionnelle.
+- **v2 : UI web locale** (Streamlit, `src/bikefit/ui/`) — ✅ MVP implémenté (`analyze` uniquement,
+  cf. section 5).
 
 ### 2.10 Module Measure (bootstrap YAML) — ✅ implémenté
 - Objectif : remplir un premier jet des YAML personnels (`config/rider/`, `config/bikes/`) sans
@@ -157,7 +158,7 @@ un seul marqueur (calibration mm/px) suffit. Précision indicative ±20 mm.
 | Config | Pydantic v2 + YAML | Validation forte des seuils |
 | Stockage | Parquet (landmarks) + SQLite (sessions) | Simple, local, sans serveur |
 | Rapport | Jinja2 → HTML, Plotly CDN | Export autonome, pas de dépendance serveur |
-| UI v2 | Streamlit (Phase 4, optionnel) | Rapide à prototyper |
+| UI v2 | Streamlit (Phase 4, MVP fait) | Rapide à prototyper |
 | Tests | pytest, données synthétiques (NumPy + OpenCV) | Non-régression géométrie + ArUco + recommandations + plan frontal + ingest MJPEG |
 | CI | GitHub Actions — lint (ruff) + format + tests Python 3.11/3.12 | Feedback rapide. `mypy` est configuré (`pyproject.toml`) mais **pas encore branché en CI** — à ajouter ou retirer de `dev` pour éviter une fausse promesse de vérification de types. |
 | Packaging | uv / pyproject.toml | Standard moderne |
@@ -332,8 +333,12 @@ bikefit/
   signaux synthétiques (`tests/test_cycles.py`) : faux PMB reproduisant le cas réel, variation de
   cadence naturelle (20%) préservée, pas de filtrage en dessous de 3 cycles.
 
-### Phase 4 — UI web *(optionnel)*
-- Streamlit : upload vidéo, squelette superposé, rapport interactif, historique sessions.
+### Phase 4 — UI web *(optionnel)* — MVP fait
+- ✅ Streamlit (`src/bikefit/ui/`) : upload vidéo profil + face optionnelle, formulaire de config
+  (côté, découpage, marqueur ArUco, vélo/coureur/profil cible), rapport HTML + recommandations affichés
+  dans le navigateur. Réutilise `cli.analyze` directement (appel Python direct, pas de subprocess).
+- Restent hors scope MVP, à ajouter si l'usage le justifie : squelette superposé (temps réel ou vidéo
+  de debug intégrée), historique/comparaison de sessions dans l'UI, `measure-body`/`measure-setup`.
 
 ---
 

@@ -118,6 +118,14 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   CLI : `--debug-video`/`--front-debug-video` sur `analyze`.
 - `cli.py` : Typer — 5 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`.
   `__main__.py` injecte `analyze` si le premier argument n'est pas un sous-commande.
+- `ui/` (Phase 4, MVP) : app Streamlit locale pour lancer `analyze` depuis le navigateur au lieu du CLI —
+  upload vidéo(s) profil/face, formulaire (côté, découpage, marqueur ArUco, vélo/coureur/profil cible),
+  rapport HTML + recommandations affichés en fin de traitement. Réutilise `cli.analyze` directement
+  (appelé comme une fonction Python normale — un `@app.command()` Typer reste une fonction appelable,
+  pas besoin de passer par le CLI/subprocess), aucune logique dupliquée. `helpers.py` porte la partie
+  pure sans dépendance Streamlit (`list_configs`, `parse_optional_float`, `save_upload`), testée dans
+  `tests/test_ui_helpers.py`. `measure-body`/`measure-setup` restent CLI-only pour l'instant (hors
+  scope du MVP). Lancement : `uv run streamlit run src/bikefit/ui/app.py`.
 
 ## État d'avancement
 - [x] Phase 0 : spike MediaPipe Tasks API (`scripts/spike_bikefit.py`). Modèle `pose_landmarker_heavy.task` dans `models/`.
@@ -162,7 +170,11 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       faisait passer l'écart-type de `genou_extension_pmb` de 2.2° à 9.8°. `_filter_implausible_cycles`
       rejette désormais tout cycle dont la durée s'écarte de plus de 35% de la médiane (à partir de
       3 cycles détectés, sous ce seuil la médiane n'est pas fiable).
-- [ ] Phase 4 (option) : UI Streamlit.
+- [x] Phase 4 (MVP) : UI Streamlit (`ui/`) — lance `analyze` (upload vidéo profil + face optionnelle,
+      formulaire de config) et affiche le rapport HTML + recommandations dans le navigateur. Réutilise
+      `cli.analyze` directement, aucune logique dupliquée. `measure-body`/`measure-setup`, l'historique
+      des sessions et la comparaison restent CLI-only pour l'instant — hors scope du MVP, à évaluer selon
+      l'usage réel de l'UI.
 
 ## Commandes
 ```bash
@@ -223,6 +235,9 @@ python -m bikefit measure-setup video.mp4 --marker-size 100 --start 20 --end 70 
 
 # Spike Phase 0
 python scripts/spike_bikefit.py video.mp4 --side right
+
+# UI Streamlit (Phase 4, MVP) — lancer une analyse depuis le navigateur
+uv run streamlit run src/bikefit/ui/app.py
 ```
 
 ## Conventions de code
