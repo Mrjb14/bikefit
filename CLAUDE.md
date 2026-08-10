@@ -1,4 +1,6 @@
-# CLAUDE.md — Contexte projet pour Claude Code
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Le projet en une phrase
 Logiciel d'analyse vidéo de bike fitting pour contre-la-montre : le cycliste se
@@ -103,6 +105,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   `reach_prolongateurs` par projection sur ce BB) ; `update_null_fields` (yaml_io) réécrit uniquement les
   champs `null` d'un YAML existant, commentaires préservés. N'écrit jamais un champ déjà renseigné —
   les estimations sont un point de départ (±5-10 % corps, ±20 mm setup), à valider au mètre ruban.
+  `measure-setup` réutilise `_trim_landmarks` (cli.py) : `--start`/`--end` pour ignorer montée/descente,
+  comme sur `analyze`.
   `render.py` : annotation visuelle OpenCV (squelette + crochets de cotation) sur la photo/frame PMB,
   pour vérifier les estimations avant `--write`.
 - `debug/` : `DebugVideoWriter` — vidéo MP4 annotée (squelette `kinematics.landmarks.SKELETON_EDGES`
@@ -213,6 +217,9 @@ python -m bikefit measure-body photo.jpg --write
 
 # Bootstrap setup vélo depuis une vidéo (marqueur ArUco requis)
 python -m bikefit measure-setup video.mp4 --marker-size 100 --write
+
+# Idem avec découpage (ignorer montée/descente, comme --start/--end sur analyze)
+python -m bikefit measure-setup video.mp4 --marker-size 100 --start 20 --end 70 --write
 
 # Spike Phase 0
 python scripts/spike_bikefit.py video.mp4 --side right
