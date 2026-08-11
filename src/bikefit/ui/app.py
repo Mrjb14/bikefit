@@ -15,11 +15,11 @@ from datetime import datetime
 
 import streamlit as st
 
-from bikefit._paths import CONFIG_DIR, OUTPUTS_DIR, REPORTS_DIR
+from bikefit._paths import CONFIG_DIR, OUTPUTS_DIR, REPORTS_DIR, SOURCES_DIR
 from bikefit.cli import analyze as run_analyze
 from bikefit.ui.helpers import list_configs, parse_optional_float, save_upload
 
-UPLOADS_DIR = OUTPUTS_DIR.parent / "sources" / "uploads"
+UPLOADS_DIR = SOURCES_DIR / "uploads"
 METRICS_DIR = OUTPUTS_DIR / "metrics"
 
 st.set_page_config(page_title="BikeFit — Analyse", layout="wide")
@@ -100,8 +100,9 @@ if submitted:
                     report=report_path,
                     save_session=save_session,
                 )
-        except Exception:
+        except Exception as exc:
             failed = True
+            log.write(f"\n{exc.__class__.__name__}: {exc}")
 
     if failed:
         st.error("Échec de l'analyse — voir le journal ci-dessous.")

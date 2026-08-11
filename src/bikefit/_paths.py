@@ -11,6 +11,11 @@ CACHE_DIR = _USER_DATA / "cache"
 
 CONFIG_DIR = PROJECT_ROOT / "config"
 
+# Sources d'entrée : vidéos/photos non regénérables. Relatif au répertoire courant
+# — surchargeable par BIKEFIT_SOURCES_DIR, en cohérence avec BIKEFIT_OUTPUTS_DIR
+# ci-dessous (les deux sont indépendants : ne pas dériver l'un de l'autre).
+SOURCES_DIR = Path(os.environ.get("BIKEFIT_SOURCES_DIR", "data/sources"))
+
 # Sorties d'analyse : rapports, métriques, vidéos de debug, images annotées.
 # Séparées des sources (data/sources/) pour qu'une analyse n'écrive jamais à côté
 # des vidéos d'entrée. Relatif au répertoire courant — le CLI s'utilise depuis la

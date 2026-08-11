@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
 from pathlib import Path
 from typing import Protocol
 
@@ -30,14 +30,22 @@ def parse_optional_float(raw: str) -> float | None:
 
 
 def save_upload(uploaded_file: UploadedFileLike, dest_dir: Path) -> Path:
-    """Écrit un fichier uploadé sur disque, horodaté pour éviter les collisions.
+    """Écrit un fichier uploadé sur disque, nommé par hash de contenu.
 
-    Persiste dans dest_dir (convention data/sources/) plutôt qu'un temp dir : les
-    vidéos réutilisées entre deux analyses profitent ainsi du cache de landmarks
-    (clé = chemin résolu + mtime + size).
+    Persiste dans dest_dir (convention data/sources/) plutôt qu'un temp dir, avec
+    un nom déterministe (hash du contenu, pas un timestamp) : réuploader la même
+    vidéo retombe sur le même chemin résolu SANS le réécrire (mtime intact) — le
+    cache de landmarks (clé = chemin résolu + mtime + size) est donc bien réutilisé
+    d'une soumission du formulaire à l'autre, comme au CLI.
+
+    `uploaded_file.name` ne garde que le nom de base (`Path(...).name`) : un champ
+    contrôlé côté client ne doit jamais dicter directement où on écrit sur disque.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = dest_dir / f"{stamp}_{uploaded_file.name}"
-    dest.write_bytes(bytes(uploaded_file.getbuffer()))
+    content = bytes(uploaded_file.getbuffer())
+    digest = hashlib.sha256(content).hexdigest()[:16]
+    safe_name = Path(uploaded_file.name).name
+    dest = dest_dir / f"{digest}_{safe_name}"
+    if not dest.exists():
+        dest.write_bytes(content)
     return dest

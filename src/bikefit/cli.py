@@ -82,6 +82,12 @@ def _warn_unreliable(metrics: object) -> None:
     )
 
 
+def _parse_bb_px(raw: str) -> tuple[float, float]:
+    """Parse l'option --bb-px ('x,y') en tuple de float. Lève ValueError si invalide."""
+    x_str, y_str = raw.split(",")
+    return float(x_str), float(y_str)
+
+
 def _trim_landmarks(
     df: pd.DataFrame,
     fps: float,
@@ -715,8 +721,7 @@ def measure_setup(
     precision_mm: int
     if bb_px_arg is not None:
         try:
-            x_str, y_str = bb_px_arg.split(",")
-            bb_px = (float(x_str), float(y_str))
+            bb_px = _parse_bb_px(bb_px_arg)
         except ValueError as exc:
             typer.echo(f"Erreur : --bb-px doit être 'x,y' (reçu {bb_px_arg!r}).", err=True)
             raise typer.Exit(1) from exc
