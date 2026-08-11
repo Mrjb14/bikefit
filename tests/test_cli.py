@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from bikefit.cli import app
+from bikefit.cli import _parse_bb_px, app
 from bikefit.equipment.models import BikeModel, BikeProfile, BikeSetup
 from bikefit.kinematics.metrics import AngleStats, FitMetrics
 from bikefit.pose.base import FrameLandmarks, Landmark
@@ -137,6 +137,32 @@ class TestAnalyzeValidation:
         result = runner.invoke(app, ["analyze", str(video), "--front", str(front)])
         # Fichiers bidon -> échoue plus loin (vidéo illisible), mais pas sur la garde.
         assert "même source" not in result.output.lower()
+
+
+# ── measure-setup --bb-px : parsing pur, sans pipeline vidéo ───────────────────
+
+
+class TestParseBbPx:
+    def test_parses_valid_pair(self) -> None:
+        assert _parse_bb_px("812,540") == (812.0, 540.0)
+
+    def test_parses_negative_and_decimal(self) -> None:
+        assert _parse_bb_px("-12.5,300.25") == (-12.5, 300.25)
+
+    def test_tolerates_surrounding_whitespace(self) -> None:
+        assert _parse_bb_px(" 100 , 200 ") == (100.0, 200.0)
+
+    def test_too_few_values_raises(self) -> None:
+        with pytest.raises(ValueError):
+            _parse_bb_px("100")
+
+    def test_too_many_values_raises(self) -> None:
+        with pytest.raises(ValueError):
+            _parse_bb_px("100,200,300")
+
+    def test_non_numeric_raises(self) -> None:
+        with pytest.raises(ValueError):
+            _parse_bb_px("abc,def")
 
 
 # ── analyze --debug-video : pipeline complet, MediaPipe remplacé par un faux ───

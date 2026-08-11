@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 
 from bikefit.calibration.models import CalibrationResult, MarkerPosition
@@ -81,6 +83,29 @@ def detect_marker_center_px(frame_bgr: np.ndarray, marker_id: int) -> tuple[floa
     return float(center[0]), float(center[1])
 
 
+def _sample_video_frames(video_path: str, sample_every: int) -> Iterator[np.ndarray]:
+    """Ouvre `video_path` et yield une frame toutes les `sample_every` frames.
+
+    Factorise la boucle de lecture/échantillonnage/libération partagée par
+    `calibrate_from_video` et `locate_marker_in_video` — seul ce qu'on fait de
+    chaque frame échantillonnée diffère entre les deux.
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(video_path)
+    try:
+        frame_idx = 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if frame_idx % sample_every == 0:
+                yield frame
+            frame_idx += 1
+    finally:
+        cap.release()
+
+
 def calibrate_from_frames(
     frames_bgr: list[np.ndarray],
     marker_size_mm: float,
@@ -129,26 +154,14 @@ def calibrate_from_video(
     Returns:
         CalibrationResult ou None si aucun marqueur n'est détecté.
     """
-    import cv2
-
-    cap = cv2.VideoCapture(video_path)
     sizes_px: list[float] = []
     n_sampled = 0
-    frame_idx = 0
 
-    try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            if frame_idx % sample_every == 0:
-                n_sampled += 1
-                size = detect_marker_size_px(frame, marker_id=marker_id)
-                if size is not None:
-                    sizes_px.append(size)
-            frame_idx += 1
-    finally:
-        cap.release()
+    for frame in _sample_video_frames(video_path, sample_every):
+        n_sampled += 1
+        size = detect_marker_size_px(frame, marker_id=marker_id)
+        if size is not None:
+            sizes_px.append(size)
 
     return _build_result(sizes_px, n_sampled, marker_size_mm)
 
@@ -167,28 +180,16 @@ def locate_marker_in_video(
 
     Retourne None si le marqueur n'est détecté sur aucune frame échantillonnée.
     """
-    import cv2
-
-    cap = cv2.VideoCapture(video_path)
     xs: list[float] = []
     ys: list[float] = []
     n_sampled = 0
-    frame_idx = 0
 
-    try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            if frame_idx % sample_every == 0:
-                n_sampled += 1
-                center = detect_marker_center_px(frame, marker_id)
-                if center is not None:
-                    xs.append(center[0])
-                    ys.append(center[1])
-            frame_idx += 1
-    finally:
-        cap.release()
+    for frame in _sample_video_frames(video_path, sample_every):
+        n_sampled += 1
+        center = detect_marker_center_px(frame, marker_id)
+        if center is not None:
+            xs.append(center[0])
+            ys.append(center[1])
 
     if not xs:
         return None
