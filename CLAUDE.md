@@ -18,6 +18,8 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `docs/aruco_marker_100mm.png` : marqueur ArUco de calibration à imprimer (DICT_4X4_50 ID=0, 100 mm).
 - `docs/aruco_marker_id1_100mm.png` : marqueur ArUco BB à imprimer (DICT_4X4_50 ID=1, 100 mm, Phase 3A+).
 - `firmware/README.md` : installation du firmware ESP32-CAM (flux MJPEG, vue de face Phase 3C).
+- `docs/depannage.md` : guide de dépannage par symptôme (calibration ArUco, cache landmarks,
+  ESP32-CAM/webcam, UI Streamlit, environnement `uv run`, CI Windows).
 - `data/` : données locales, **entièrement gitignoré**. Séparation stricte entrées/sorties :
   - `data/sources/` : vidéos et photos d'entrée (les seuls fichiers non regénérables).
   - `data/outputs/` : tout ce que le CLI produit — `reports/` (HTML), `metrics/` (JSON),

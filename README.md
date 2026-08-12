@@ -270,6 +270,7 @@ bikefit/
 ├── docs/
 │   ├── plan-developpement.md
 │   ├── procedure-mesures.md     # procédure de prise de mesures + validation ruban
+│   ├── depannage.md             # guide de dépannage par symptôme
 │   ├── aruco_marker_100mm.png   # marqueur calibration à imprimer (100 mm, DICT_4X4_50 ID=0)
 │   └── aruco_marker_id1_100mm.png # marqueur BB à imprimer (100 mm, DICT_4X4_50 ID=1, Phase 3A+)
 ├── firmware/
@@ -317,6 +318,7 @@ révéler les bugs d'encodage console et de séparateurs de chemin. Couverture m
 
 - [Plan de développement & architecture](docs/plan-developpement.md)
 - [Procédure de prise de mesures](docs/procedure-mesures.md) — `measure-body` / `measure-setup` + validation au mètre ruban
+- [Dépannage](docs/depannage.md) — guide par symptôme (calibration, cache, ESP32-CAM, UI, CI...)
 - [CLAUDE.md](CLAUDE.md) — contexte pour Claude Code
 
 ## Statut
