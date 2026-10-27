@@ -1,3 +1,8 @@
+{% macro unreliable_note(stat) -%}
+<div class="metric-unreliable" title="Calculée sur des points inférés par le modèle, pas réellement observés">
+  ⚠ peu fiable{% if stat.visibility is not none %} — visibilité {{ "%.2f"|format(stat.visibility) }}{% endif %}{% if stat.frames_kept is not none %}, {{ "%.0f"|format(stat.frames_kept * 100) }}% des frames{% endif %}
+</div>
+{%- endmacro -%}
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -83,14 +88,17 @@
       ("Cheville PMB",    metrics.cheville_pmb,       "cheville_pmb"),
     ] %}
     {% for label, stat, key in cards %}
-    {% set cls = "warn" if key in report.angles_hors_cible else "ok" %}
+    {% set cls = "warn" if (key in report.angles_hors_cible or not stat.is_measured) else "ok" %}
     <div class="metric-card {{ cls }}">
       <div class="metric-name">{{ label }}</div>
+      {% if stat.is_measured %}
       <div class="metric-value">{{ "%.1f"|format(stat.mean) }}°</div>
       <div class="metric-std">± {{ "%.1f"|format(stat.std) }}° &nbsp; [{{ "%.1f"|format(stat.min) }} – {{ "%.1f"|format(stat.max) }}]</div>
-      {% if not stat.is_reliable %}
-      <div class="metric-unreliable" title="Calculée sur des points inférés par le modèle, pas réellement observés">
-        ⚠ peu fiable — visibilité {{ "%.2f"|format(stat.visibility) }}, {{ "%.0f"|format(stat.frames_kept * 100) }}% des frames
+      {% if not stat.is_reliable %}{{ unreliable_note(stat) }}{% endif %}
+      {% else %}
+      <div class="metric-value">—</div>
+      <div class="metric-unreliable" title="Aucun cycle exploitable : point masqué ou inféré sur toute la vidéo">
+        ⚠ non mesuré — aucun cycle exploitable
       </div>
       {% endif %}
     </div>
@@ -111,11 +119,7 @@
       <div class="metric-name">{{ label }}</div>
       <div class="metric-value">{{ "%.1f"|format(stat.mean) }}{{ unit }}</div>
       <div class="metric-std">± {{ "%.1f"|format(stat.std) }}{{ unit }} &nbsp; {{ stat.n_cycles }} cycles</div>
-      {% if not stat.is_reliable %}
-      <div class="metric-unreliable" title="Calculée sur des points inférés par le modèle, pas réellement observés">
-        ⚠ peu fiable — visibilité {{ "%.2f"|format(stat.visibility) }}, {{ "%.0f"|format(stat.frames_kept * 100) }}% des frames
-      </div>
-      {% endif %}
+      {% if not stat.is_reliable %}{{ unreliable_note(stat) }}{% endif %}
     </div>
     {% endif %}
     {% endfor %}

@@ -70,11 +70,16 @@ def _warn_unreliable(metrics: object) -> None:
 
     typer.echo("\nAvertissement : métriques peu fiables (points inférés par le modèle) :", err=True)
     for label, stat in suspects:
-        typer.echo(
-            f"  {label} : visibilité {stat.visibility:.2f},"
-            f" {stat.frames_kept:.0%} des frames exploitables",
-            err=True,
+        if not stat.is_measured:
+            typer.echo(f"  {label} : non mesurée (aucun cycle exploitable)", err=True)
+            continue
+        vis = f"visibilité {stat.visibility:.2f}" if stat.visibility is not None else ""
+        kept = (
+            f"{stat.frames_kept:.0%} des frames exploitables"
+            if stat.frames_kept is not None
+            else ""
         )
+        typer.echo(f"  {label} : {', '.join(x for x in (vis, kept) if x)}", err=True)
     typer.echo(
         "  -> à interpréter avec prudence : améliorer le cadrage ou l'éclairage"
         " de la caméra concernée.",
@@ -86,6 +91,43 @@ def _parse_bb_px(raw: str) -> tuple[float, float]:
     """Parse l'option --bb-px ('x,y') en tuple de float. Lève ValueError si invalide."""
     x_str, y_str = raw.split(",")
     return float(x_str), float(y_str)
+
+
+def _front_scale(front: str, is_live: bool, marker_size: float | None) -> float | None:
+    """mm/px de la caméra de face, calibrée sur SA propre vidéo (marqueur ID=0).
+
+    None si non demandé, impossible (flux live) ou marqueur introuvable : la largeur
+    des coudes reste alors non convertie et la recommandation de pads silencieuse.
+    """
+    if marker_size is None:
+        typer.echo(
+            "  Largeur des coudes non convertie en mm : ajouter --front-marker-size"
+            " (marqueur visible par la caméra de face).",
+        )
+        return None
+    if is_live:
+        typer.echo(
+            "  Avertissement : calibration ArUco non supportée sur un flux/une webcam"
+            " (--front-marker-size ignoré) — enregistrer un fichier vidéo.",
+            err=True,
+        )
+        return None
+
+    from bikefit.calibration import calibrate_from_video
+
+    calib = calibrate_from_video(front, marker_size_mm=marker_size)
+    if calib is None:
+        typer.echo("  Avertissement : aucun marqueur ArUco détecté vue de face.", err=True)
+        return None
+    if not calib.is_reliable:
+        typer.echo(
+            f"  Avertissement : calibration face peu fiable ({calib.n_detected}/"
+            f"{calib.n_sampled} frames) — largeur des coudes non convertie.",
+            err=True,
+        )
+        return None
+    typer.echo(f"  Calibration face : {calib.mm_per_pixel:.4f} mm/px")
+    return calib.mm_per_pixel
 
 
 def _trim_landmarks(
@@ -191,6 +233,14 @@ def analyze(
         float | None,
         typer.Option(help="Taille du côté du marqueur ArUco en mm (ex. 100)."),
     ] = None,
+    front_marker_size: Annotated[
+        float | None,
+        typer.Option(
+            help="Taille (mm) du marqueur ArUco ID=0 visible par la caméra de FACE."
+            " Requis pour convertir la largeur des coudes en mm : l'échelle de la vue"
+            " de profil ne s'applique pas à une autre caméra."
+        ),
+    ] = None,
 ) -> None:
     """Analyse une vidéo et produit les métriques de fitting + recommandations."""
     from bikefit._paths import REPORTS_DIR
@@ -264,14 +314,8 @@ def analyze(
             else:
                 df = compute_landmarks(reader, estimator, max_duration_s=duration)
         else:
-            if no_cache:
-                from bikefit.pose.cache import _video_key
-
-                key = _video_key(video_path)
-                cache_file = CACHE_DIR / "landmarks" / f"{video_path.stem}_{key}.parquet"
-                if cache_file.exists():
-                    cache_file.unlink()
-                    typer.echo("Cache supprimé.")
+            if no_cache and cache.invalidate(video_path):
+                typer.echo("Cache supprimé.")
 
             df = cache.get_or_compute(video_path, reader, estimator)
 
@@ -300,7 +344,16 @@ def analyze(
         )
         typer.echo(f"Vidéo de debug -> {debug_video}")
 
-    metrics = aggregate_cycles(angle_df, cycles)
+    try:
+        metrics = aggregate_cycles(angle_df, cycles)
+    except ValueError as exc:
+        typer.echo(f"Erreur : {exc}", err=True)
+        typer.echo(
+            "  -> vérifier --side (côté réellement filmé), le cadrage (jambe entière"
+            " visible) et --start/--end (pédalage effectif). Voir docs/depannage.md.",
+            err=True,
+        )
+        raise typer.Exit(1) from exc
 
     # ── Calibration ArUco (optionnelle) ──────────────────────────────────────
     if marker_size is not None:
@@ -399,11 +452,19 @@ def analyze(
                 err=True,
             )
         else:
-            mm_per_px = metrics.calibration.mm_per_pixel if metrics.calibration else None
-            frontal_stats = aggregate_frontal_cycles(
-                frontal_df, front_cycles, mm_per_pixel=mm_per_px
-            )
-            metrics = metrics.model_copy(update=frontal_stats)
+            # Échelle mm/px propre à la caméra de face : réutiliser celle de la vue de
+            # profil (autre capteur, autre distance) donnait une largeur de coudes fausse.
+            front_mm_per_px = _front_scale(front, front_reader.is_live, front_marker_size)
+            try:
+                frontal_stats = aggregate_frontal_cycles(
+                    frontal_df, front_cycles, mm_per_pixel=front_mm_per_px
+                )
+            except ValueError as exc:
+                # La vue de face est optionnelle : son échec ne doit pas faire perdre
+                # l'analyse de profil, déjà calculée.
+                typer.echo(f"  Avertissement : vue de face ignorée — {exc}", err=True)
+            else:
+                metrics = metrics.model_copy(update=frontal_stats)
 
     # ── Fiabilité ────────────────────────────────────────────────────────────
     # Une métrique calculée sur des points inférés doit se voir, pas se deviner
@@ -441,9 +502,12 @@ def analyze(
     fit_report = run_recommend(metrics, bike_profile, profile=profile, rider=rider_profile)
 
     # ── Sortie JSON ──────────────────────────────────────────────────────────
+    # Passage par model_dump_json : une métrique non mesurée (NaN) devient `null`.
+    # json.dumps(model_dump()) écrivait `NaN`, qui n'est pas du JSON valide
+    # (rejeté par JSON.parse, jq, etc.).
     result = {
-        "metriques": metrics.model_dump(),
-        "rapport": fit_report.model_dump(),
+        "metriques": json.loads(metrics.model_dump_json()),
+        "rapport": json.loads(fit_report.model_dump_json()),
     }
     json_str = json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -690,12 +754,7 @@ def measure_setup(
 
     cache = LandmarkCache(CACHE_DIR / "landmarks")
     if no_cache:
-        from bikefit.pose.cache import _video_key
-
-        key = _video_key(video)
-        cache_file = CACHE_DIR / "landmarks" / f"{video.stem}_{key}.parquet"
-        if cache_file.exists():
-            cache_file.unlink()
+        cache.invalidate(video)
 
     with MediaPipePoseEstimator() as estimator:
         df = cache.get_or_compute(video, reader, estimator)
