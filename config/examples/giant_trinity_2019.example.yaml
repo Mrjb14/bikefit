@@ -1,0 +1,37 @@
+# Fiche vélo d'exemple — Giant Trinity Advanced Pro 2 (taille M).
+# Copier vers config/bikes/giant_trinity_2019.yaml (dossier gitignoré) puis compléter :
+#   cp config/examples/giant_trinity_2019.example.yaml config/bikes/giant_trinity_2019.yaml
+# Les champs `null` sont à mesurer ; `measure-setup --write` ne remplit QUE les `null`,
+# et ses estimations sont à valider au mètre ruban (docs/procedure-mesures.md).
+# Unités : mm et degrés.
+
+modele:
+  marque: Giant
+  nom: Trinity Advanced Pro 2
+  annee: 2019
+  taille: M
+  discipline: contre-la-montre
+
+geometrie:
+  stack: 539
+  reach: 417
+
+transmission:
+  groupe: Shimano Ultegra
+  pedalier:
+    # À lire sur la manivelle. Critique : la conversion angle -> mm en dépend.
+    # Tant que c'est null, le défaut 172.5 mm est utilisé.
+    longueur_manivelles: null
+
+# Réglages actuels, mesurés sur le vélo (null = inconnu).
+setup_actuel:
+  hauteur_selle_bb: null      # axe pédalier -> sommet selle
+  recul_selle: null           # mm, positif = reculé
+  hauteur_guidon_bb: null     # axe pédalier -> pad repose-mains
+  reach_prolongateurs: null   # centre BB -> extrémité des prolongateurs
+
+# Plages admissibles imposées par le matériel (null = non borné).
+plages_reglage:
+  hauteur_selle: {min: null, max: null}
+  recul_selle: {min: null, max: null}
+  reach_prolong: {min: null, max: null}

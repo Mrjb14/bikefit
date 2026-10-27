@@ -4,6 +4,11 @@ Ce document décrit comment remplir les deux fichiers de configuration :
 - `config/rider/mensurations.yaml` — mensurations corporelles
 - `config/bikes/giant_trinity_2019.yaml` — réglages actuels du vélo (`setup_actuel`)
 
+> Ces deux fichiers sont gitignorés (données personnelles). Sur un clone neuf, partir des modèles
+> versionnés dans `config/examples/` :
+> `cp config/examples/giant_trinity_2019.example.yaml config/bikes/giant_trinity_2019.yaml` et
+> `cp config/examples/mensurations.example.yaml config/rider/mensurations.yaml`.
+
 Chaque mesure peut être obtenue **automatiquement** (photo ou vidéo) puis **validée** au mètre ruban.
 La validation physique est obligatoire avant de considérer une mesure comme fiable.
 

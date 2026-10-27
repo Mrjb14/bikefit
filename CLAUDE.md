@@ -14,6 +14,11 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   (`measure-body`/`measure-setup`) puis validation obligatoire au mètre ruban.
 - `config/bikes/giant_trinity_2019.yaml` : fiche du vélo cible (Giant Trinity Advanced Pro 2, 2019, M).
 - `config/rider/mensurations.yaml` : mensurations personnelles + objectif (Ironman 2027-05-21).
+- `config/examples/` : fiches d'exemple versionnées (`giant_trinity_2019.example.yaml`,
+  `mensurations.example.yaml`, champs à mesurer = `null`). `config/bikes/` et `config/rider/` sont
+  gitignorés (données perso) : sur un clone neuf, copier les exemples dans ces dossiers
+  (`cp config/examples/giant_trinity_2019.example.yaml config/bikes/giant_trinity_2019.yaml`).
+  `tests/test_config_examples.py` garantit qu'ils restent chargeables par les modèles Pydantic.
 - `scripts/spike_bikefit.py` : spike Phase 0 (script autonome, Tasks API MediaPipe v1.0).
 - `docs/aruco_marker_100mm.png` : marqueur ArUco de calibration à imprimer (DICT_4X4_50 ID=0, 100 mm).
 - `docs/aruco_marker_id1_100mm.png` : marqueur ArUco BB à imprimer (DICT_4X4_50 ID=1, 100 mm, Phase 3A+).
@@ -184,7 +189,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (234 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
+# Tests (245 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
 # storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML, UI helpers,
 # CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
