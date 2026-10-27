@@ -144,6 +144,22 @@ class TestDetectCycles:
         durations = [end - start for start, end in cycles]
         assert durations == [24, 24, 24, 24]
 
+    def test_small_noise_bump_does_not_split_a_cycle(self) -> None:
+        # 60 rpm @ 30 fps : PMB toutes les 30 frames. Un petit rebond (3 % de
+        # l'amplitude crête-crête) au PMH, à 15 frames de chaque PMB : assez loin
+        # pour passer la distance minimale (12 frames). Sans seuil de proéminence,
+        # il devenait un faux PMB qui coupait le cycle en deux demi-cycles, ensuite
+        # rejetés tous les deux par le filtre de plausibilité.
+        df = _pedaling_df(n_cycles=6, fps=30.0, rpm=60.0)
+        ankle_idx = BODY["right"]["ankle"]
+        t = df["frame_idx"].to_numpy()
+        bump = 0.012 * np.exp(-((t - 60) ** 2) / (2 * 1.0**2))  # PMH du 3e cycle
+        df[f"lm_{ankle_idx}_y"] = df[f"lm_{ankle_idx}_y"] + bump
+
+        cycles = detect_cycles(df, "right", fps=30.0)
+        durations = [end - start for start, end in cycles]
+        assert durations == [30] * 5
+
 
 class TestFilterImplausibleCycles:
     def test_keeps_regular_cycles(self) -> None:

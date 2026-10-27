@@ -74,6 +74,18 @@ class LandmarkCache:
     def __init__(self, cache_dir: Path = CACHE_DIR / "landmarks") -> None:
         self._cache_dir = cache_dir
 
+    def path_for(self, video_path: Path) -> Path:
+        """Fichier Parquet associé à une vidéo (clé = chemin résolu + mtime + taille)."""
+        return self._cache_dir / f"{video_path.stem}_{_video_key(video_path)}.parquet"
+
+    def invalidate(self, video_path: Path) -> bool:
+        """Supprime le cache d'une vidéo (option --no-cache). True s'il existait."""
+        cache_path = self.path_for(video_path)
+        if not cache_path.exists():
+            return False
+        cache_path.unlink()
+        return True
+
     def get_or_compute(
         self,
         video_path: Path,
@@ -81,8 +93,7 @@ class LandmarkCache:
         estimator: PoseEstimator,
         progress: bool = True,
     ) -> pd.DataFrame:
-        key = _video_key(video_path)
-        cache_path = self._cache_dir / f"{video_path.stem}_{key}.parquet"
+        cache_path = self.path_for(video_path)
 
         if cache_path.exists():
             if progress:

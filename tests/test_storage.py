@@ -126,3 +126,29 @@ class TestSessionStore:
         store1.save(_session())
         store2 = SessionStore(db)
         assert len(store2.list_all()) == 1
+
+
+def test_session_with_unmeasured_metric_roundtrips(tmp_path: Path) -> None:
+    """Régression : une métrique NaN était sérialisée en null puis refusée à la relecture,
+    rendant la session (et `history`/`compare` sur toute la base) illisible."""
+    import math
+
+    from bikefit.kinematics.metrics import AngleStats
+
+    nan = float("nan")
+    session = _session()
+    session = session.model_copy(
+        update={
+            "metrics": session.metrics.model_copy(
+                update={"coude": AngleStats(mean=nan, std=nan, min=nan, max=nan, n_cycles=0)}
+            )
+        }
+    )
+    store = SessionStore(tmp_path / "s.db")
+    saved = store.save(session)
+
+    loaded = store.get(saved.id or 0)
+    assert loaded is not None
+    assert math.isnan(loaded.metrics.coude.mean)
+    assert not loaded.metrics.coude.is_measured
+    assert len(store.list_all()) == 1

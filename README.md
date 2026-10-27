@@ -88,6 +88,8 @@ Options:
   --no-cache           Force le recalcul des landmarks MediaPipe (fichier uniquement)
   --front TEXT         Vidéo, flux MJPEG ou webcam (webcam:0) de la vue de face (Phase 3C)
   --front-duration FLOAT  Durée de capture (s) si --front est un flux réseau ou une webcam (défaut: 15)
+  --front-marker-size FLOAT  Taille (mm) du marqueur ArUco ID=0 vu par la caméra de FACE — requis
+                       pour la largeur des coudes en mm (fichier vidéo uniquement)
   --debug-video PATH   Vidéo de debug (squelette + angles superposés), vue de profil
   --front-debug-video PATH  Vidéo de debug (squelette + métriques superposés), vue de face
 ```
@@ -220,6 +222,12 @@ Pour la vue de face, les métriques apparaissent dans `FitMetrics` (`genou_devia
 `largeur_coudes`) et un schéma vélo vue de face s'ajoute au rapport HTML. ⚠️ Le firmware ESP32-CAM ne
 gère qu'un client à la fois : fermer tout onglet/lecteur déjà ouvert sur le flux avant de lancer la
 capture. La calibration ArUco (`--marker-size`) n'est disponible que sur fichier vidéo.
+
+`largeur_coudes` n'est convertie en mm qu'avec `--front-marker-size` : la calibration se fait sur la
+vidéo de face elle-même (marqueur ID=0 visible par cette caméra). L'échelle de la vue de profil
+(`--marker-size`) n'est jamais réutilisée — autre capteur, autre distance, donc un mm/px faux.
+Si la vue de face n'a aucun cycle exploitable, elle est ignorée avec un avertissement et l'analyse
+de profil reste produite.
 
 ## Vidéo de debug
 

@@ -51,5 +51,21 @@ def test_cycle_with_too_many_nan_is_skipped() -> None:
 def test_no_valid_cycle_raises() -> None:
     df = _synthetic_frontal_df(n=5)
     df["genou_deviation_gauche"] = np.nan
+    df["genou_deviation_droit"] = np.nan
     with pytest.raises(ValueError):
         aggregate_frontal_cycles(df, [(0, 4)])
+
+
+def test_masked_knee_does_not_drop_the_other() -> None:
+    """Cas réel (ESP32-CAM) : genou gauche inféré sur toute la capture.
+
+    Avant : le rejet des cycles se basait sur le seul genou gauche, si bien que le
+    genou droit, pourtant bien vu, était perdu (voire l'analyse entière plantait).
+    """
+    df = _synthetic_frontal_df()
+    df["genou_deviation_gauche"] = np.nan
+    result = aggregate_frontal_cycles(df, [(0, 9), (10, 19)])
+
+    assert "genou_deviation_gauche" not in result
+    assert result["genou_deviation_droit"].mean == pytest.approx(-2.0, abs=0.01)
+    assert result["genou_deviation_droit"].n_cycles == 2
