@@ -1,0 +1,27 @@
+# Fiche coureur d'exemple. Copier vers config/rider/mensurations.yaml (gitignoré) :
+#   cp config/examples/mensurations.example.yaml config/rider/mensurations.yaml
+# Toutes les longueurs sont en MILLIMÈTRES (179 cm -> 1790).
+# `measure-body --write` ne remplit que les `null`, estimations à valider au mètre ruban.
+
+mensurations:
+  taille: null
+  entrejambe: null
+  longueur_femur: null
+  longueur_tibia: null
+  longueur_buste: null
+  longueur_bras: null
+  largeur_epaules: null   # requise pour la recommandation de largeur de pads
+  largeur_hanches: null
+  pointure: null
+
+profil:
+  poids_kg: null
+  age: null
+  flexibilite: null       # faible | moyenne | bonne | excellente
+  historique_blessure: null
+
+objectif:
+  type_epreuve: null
+  distance_km: null
+  duree_effort_min: null
+  echeance: null          # AAAA-MM-JJ
