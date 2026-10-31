@@ -1,4 +1,4 @@
-"""CLI BikeFit — Phase 1, 2 & 3B."""
+"""CLI BikeFit — analyse, sessions, mesures, aéro (Kinect)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import typer
 if TYPE_CHECKING:
     import pandas as pd
 
+    from bikefit.aero import FrontalAreaStats
     from bikefit.kinematics.landmarks import Side
 
 app = typer.Typer(help="Analyse vidéo de position cycliste (CLM)")
@@ -642,6 +643,225 @@ def compare(
         typer.echo(f"\n  Session #{id2} : aucune recommandation — position optimale !")
 
     typer.echo("")
+
+
+@app.command()
+def aero(
+    recordings: Annotated[
+        list[Path],
+        typer.Argument(
+            help="Enregistrement(s) de profondeur vue de face (dossiers, cf. kinect_capture.py)."
+            " Le premier sert de référence pour les écarts."
+        ),
+    ],
+    rider: Annotated[
+        str, typer.Option(help="Fiche coureur (Cd calibré, section aero)")
+    ] = "mensurations",
+    cd: Annotated[
+        float | None, typer.Option(help="Cd à utiliser (prioritaire sur la fiche coureur)")
+    ] = None,
+    cda_terrain: Annotated[
+        float | None,
+        typer.Option(
+            help="CdA mesuré sur route (m², méthode Chung) pour la position du 1er"
+            " enregistrement : calibre Cd = CdA / surface."
+        ),
+    ] = None,
+    write: Annotated[
+        bool, typer.Option(help="Avec --cda-terrain : écrit la calibration dans la fiche")
+    ] = False,
+    speed_kmh: Annotated[float, typer.Option(help="Vitesse de référence (km/h)")] = 36.0,
+    distance_km: Annotated[float, typer.Option(help="Distance pour le temps gagné (km)")] = 180.0,
+    near_mm: Annotated[float | None, typer.Option(help="Profondeur min du cycliste (mm)")] = None,
+    far_mm: Annotated[float | None, typer.Option(help="Profondeur max du cycliste (mm)")] = None,
+    band_mm: Annotated[
+        float, typer.Option(help="Demi-largeur de la bande auto autour du buste (mm)")
+    ] = 900.0,
+    no_floor: Annotated[bool, typer.Option(help="Ne pas retirer le sol (RANSAC)")] = False,
+    start: Annotated[float | None, typer.Option(help="Ignore les N premières secondes")] = None,
+    end: Annotated[float | None, typer.Option(help="Ignore au-delà de N secondes")] = None,
+    marker_size: Annotated[
+        float | None,
+        typer.Option(help="Marqueur ArUco ID=0 (mm) dans rgb.mp4 : vérifie fx de la caméra"),
+    ] = None,
+    debug_dir: Annotated[
+        Path | None,
+        typer.Option(help="Dossier des vidéos de contrôle de la segmentation (une par position)"),
+    ] = None,
+    output: Annotated[Path | None, typer.Option(help="Résultats JSON")] = None,
+) -> None:
+    """Surface frontale (Kinect, vue de face), CdA estimé et comparaison de positions."""
+    from bikefit._paths import CONFIG_DIR
+    from bikefit.aero import (
+        DepthRecording,
+        analyze_frontal_area,
+        calibrate_cd,
+        cd_is_plausible,
+        check_intrinsics_with_marker,
+    )
+    from bikefit.aero.compare import compare_positions, format_duration
+    from bikefit.aero.drag import CD_PLAUSIBLE_RANGE
+    from bikefit.aero.render import SegmentationVideoWriter
+    from bikefit.equipment import load_rider_profile
+
+    named: list[tuple[str, FrontalAreaStats]] = []
+    for path in recordings:
+        try:
+            rec = DepthRecording(path)
+        except (FileNotFoundError, ValueError) as exc:
+            typer.echo(f"Erreur : {exc}", err=True)
+            raise typer.Exit(1) from exc
+
+        name = path.name
+        typer.echo(
+            f"\n[{len(named) + 1}] {name} : {rec.frame_count} frames @ {rec.fps:.0f} fps,"
+            f" fx={rec.intrinsics.fx:.0f}"
+        )
+        if marker_size is not None:
+            check = check_intrinsics_with_marker(rec, marker_size)
+            if check is None:
+                typer.echo("  Vérification fx : marqueur introuvable (ou rgb.mp4 absent).")
+            else:
+                verdict = "OK" if check.is_ok else "A CORRIGER"
+                typer.echo(
+                    f"  Vérification fx : {check.fx_estimated:.0f} mesuré"
+                    f" ({check.relative_error:+.1%}, {check.n_frames} frames) -> {verdict},"
+                    f" erreur induite sur la surface {check.area_error:+.1%}"
+                )
+
+        writer = (
+            SegmentationVideoWriter(debug_dir / f"{name}_segmentation.mp4", rec.fps)
+            if debug_dir is not None
+            else None
+        )
+        try:
+            stats, _ = analyze_frontal_area(
+                rec,
+                near_mm=near_mm,
+                far_mm=far_mm,
+                band_mm=band_mm,
+                remove_floor=not no_floor,
+                start_s=start,
+                end_s=end,
+                on_frame=writer,
+            )
+        except ValueError as exc:
+            typer.echo(f"Erreur : {exc}", err=True)
+            raise typer.Exit(1) from exc
+        finally:
+            if writer is not None:
+                writer.close()
+        if writer is not None:
+            typer.echo(f"  Vidéo de contrôle -> {writer.path}")
+        named.append((name, stats))
+
+    # ── Cd : option > calibration terrain > fiche coureur ─────────────────────
+    rider_profile = load_rider_profile(rider)
+    cd_value, cd_source = cd, "--cd"
+    ref_stats = named[0][1]
+    if cda_terrain is not None:
+        if not ref_stats.is_measured:
+            typer.echo(
+                "Erreur : surface de référence non mesurée, calibration impossible.", err=True
+            )
+            raise typer.Exit(1)
+        calibrated = round(calibrate_cd(cda_terrain, ref_stats.mean_m2), 3)
+        typer.echo(f"\nCalibration : Cd = {cda_terrain} / {ref_stats.mean_m2:.3f} = {calibrated}")
+        if not cd_is_plausible(calibrated):
+            lo, hi = CD_PLAUSIBLE_RANGE
+            typer.echo(
+                f"  Avertissement : Cd hors plage plausible ({lo}-{hi}) -> vérifier la"
+                " segmentation (--debug-dir) et la mesure terrain.",
+                err=True,
+            )
+        if not ref_stats.is_reliable:
+            typer.echo(
+                "  Avertissement : surface de référence peu fiable, calibration fragile.",
+                err=True,
+            )
+        if cd_value is None:
+            cd_value, cd_source = calibrated, "calibration terrain"
+        if write:
+            from bikefit.measure.yaml_io import update_null_fields
+
+            yaml_path = CONFIG_DIR / "rider" / f"{rider}.yaml"
+            updated = (
+                update_null_fields(
+                    yaml_path,
+                    {
+                        "cd": calibrated,
+                        "cda_terrain_m2": cda_terrain,
+                        "surface_ref_m2": round(ref_stats.mean_m2, 4),
+                    },
+                )
+                if yaml_path.exists()
+                else []
+            )
+            if updated:
+                typer.echo(f"  Calibration écrite dans {yaml_path} : {updated}")
+            else:
+                typer.echo(
+                    "  Rien écrit : section `aero` absente ou déjà renseignée dans la fiche"
+                    " (cf. config/examples/mensurations.example.yaml).",
+                    err=True,
+                )
+    if cd_value is None and rider_profile is not None and rider_profile.aero.cd is not None:
+        cd_value, cd_source = rider_profile.aero.cd, f"fiche {rider}"
+
+    results = compare_positions(named, cd_value, speed_kmh, distance_km)
+
+    # ── Affichage ─────────────────────────────────────────────────────────────
+    typer.echo("")
+    if cd_value is None:
+        typer.echo(
+            "Cd non calibré : surfaces et écarts relatifs seulement (CdA, watts et temps"
+            " après calibration terrain, cf. docs/kinect-aero.md)."
+        )
+    else:
+        typer.echo(f"Cd = {cd_value} ({cd_source}), vitesse de référence {speed_kmh:.0f} km/h")
+
+    for i, res in enumerate(results, start=1):
+        s = res.stats
+        if not s.is_measured:
+            typer.echo(f"[{i}] {res.name} : surface non mesurée.")
+        else:
+            typer.echo(
+                f"[{i}] {res.name} : A = {s.mean_m2:.3f} m2 +/- {s.std_m2:.3f}"
+                f" ({s.n_windows} fenêtres de {s.window_s:.2f} s"
+                f"{'' if s.period_detected else ', cadence non détectée'},"
+                f" trous {s.hole_ratio:.0%}, {s.frames_kept:.0%} des frames)"
+            )
+        if res.cda_m2 is not None and res.power_w is not None:
+            typer.echo(f"      CdA ~ {res.cda_m2:.3f} m2 -> {res.power_w:.0f} W aéro")
+        if res.delta_area_pct is not None:
+            line = f"      vs [1] : surface {res.delta_area_pct:+.1f} %"
+            if res.delta_power_w is not None and res.time_saved_s is not None:
+                line += (
+                    f", {res.delta_power_w:+.1f} W à vitesse égale,"
+                    f" {format_duration(res.time_saved_s)} sur {distance_km:.0f} km"
+                )
+            line += "" if res.significant else " (non significatif : dans le bruit de mesure)"
+            typer.echo(line)
+        for issue in s.reliability_issues:
+            typer.echo(f"      Peu fiable : {issue}", err=True)
+
+    if len(results) > 1 and cd_value is not None:
+        typer.echo(
+            "\nHypothèse : Cd identique entre positions. Un gain de forme (tête rentrée,"
+            " épaules) sans baisse de surface n'est pas vu par la Kinect."
+        )
+
+    if output is not None:
+        payload = {
+            "cd": cd_value,
+            "cd_source": cd_source if cd_value is not None else None,
+            "speed_kmh": speed_kmh,
+            "distance_km": distance_km,
+            "positions": [json.loads(r.model_dump_json()) for r in results],
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        typer.echo(f"\nRésultats -> {output}")
 
 
 @app.command("measure-body")

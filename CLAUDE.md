@@ -23,6 +23,10 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `docs/aruco_marker_100mm.png` : marqueur ArUco de calibration à imprimer (DICT_4X4_50 ID=0, 100 mm).
 - `docs/aruco_marker_id1_100mm.png` : marqueur ArUco BB à imprimer (DICT_4X4_50 ID=1, 100 mm, Phase 3A+).
 - `firmware/README.md` : installation du firmware ESP32-CAM (flux MJPEG, vue de face Phase 3C).
+- `docs/kinect-aero.md` : aéro à la Kinect Xbox 360 — installation libfreenect, placement, protocole,
+  vérification fx au marqueur, calibration du Cd sur route (méthode Chung), critères d'essai.
+- `scripts/kinect_capture.py` : capture Kinect v1 (libfreenect, DEPTH_REGISTERED) -> enregistrement de
+  profondeur. Logique `capture()` testée avec une fausse source ; **jamais lancé sur le matériel**.
 - `docs/depannage.md` : guide de dépannage par symptôme (calibration ArUco, cache landmarks,
   ESP32-CAM/webcam, UI Streamlit, environnement `uv run`, CI Windows).
 - `data/` : données locales, **entièrement gitignoré**. Séparation stricte entrées/sorties :
@@ -141,7 +145,23 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   et `render_debug_video_live` (flux/webcam — un flux ne se rejoue pas, écrit pendant l'unique passage
   de capture via le hook `on_frame` de `pose.compute_landmarks`, angles bruts non lissés par frame).
   CLI : `--debug-video`/`--front-debug-video` sur `analyze`.
-- `cli.py` : Typer — 5 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`.
+- `aero/` (vue de face RGB-D, indépendant de MediaPipe) : surface frontale du cycliste depuis la
+  profondeur Kinect. `recording.py` : format dossier (`depth/NNNNNN.png` 16 bits en mm alignée sur la
+  couleur, 0 = invalide ; `meta.json` fps réel/horodatages/intrinsèques ; `rgb.mp4` optionnel),
+  `DepthRecording` (lecture paresseuse), `save_depth_recording`, `KINECT_V1_REGISTERED` (fx=525 : approx).
+  `area.py` : sol par RANSAC (une fois, sur la médiane de 15 frames), bande de profondeur auto autour du
+  buste (1er quartile de la fenêtre centrale — la médiane basculait sur le mur si le buste était troué),
+  plus grande composante, trous **sans mesure** entourés bouchés (comptés, `hole_ratio`) mais trous où
+  l'on voit le fond exclus (air entre bras et buste), aire = Σ z²/(fx·fy). Moyenne par fenêtres d'une
+  période de pédalage (autocorrélation de la surface ; fenêtres d'1 s à défaut). `FrontalAreaStats` :
+  `is_reliable` / `reliability_issues` (trous > 10 %, frames < 80 %, < 5 fenêtres, sol non retiré,
+  surface hors 0,15-1,2 m²). `drag.py` : Cd = CdA terrain / A Kinect, `aero_power_w`, `time_saved_s`.
+  `compare.py` : écarts vs 1re position, significatif si > 2× l'erreur standard combinée.
+  `intrinsics.py` : fx estimé au marqueur ArUco (taille_px · z / taille_mm). `render.py` : vidéo de
+  contrôle (vert compté, rouge trou bouché). Cd calibré stocké dans la fiche coureur
+  (`RiderProfile.aero` : `cd`, `cda_terrain_m2`, `surface_ref_m2`, `source`), valable pour CE montage.
+- `cli.py` : Typer — 6 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`,
+  `aero` (surface frontale Kinect, `--cda-terrain/--write` pour calibrer Cd, `--debug-dir`).
   `__main__.py` injecte `analyze` si le premier argument n'est pas un sous-commande.
 - `ui/` (Phase 4, MVP) : app Streamlit locale pour lancer `analyze` depuis le navigateur au lieu du CLI —
   upload vidéo(s) profil/face, formulaire (côté, découpage, marqueur ArUco, vélo/coureur/profil cible),
@@ -201,13 +221,17 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       `cli.analyze` directement, aucune logique dupliquée. `measure-body`/`measure-setup`, l'historique
       des sessions et la comparaison restent CLI-only pour l'instant — hors scope du MVP, à évaluer selon
       l'usage réel de l'UI.
+- [ ] Aéro Kinect (`aero/`, `bikefit aero`) : implémenté et testé sur scènes de profondeur synthétiques
+      (aire connue, indépendance à la distance, trous IR, sol, trous d'air, période, CLI). **Reste à
+      faire** : installer libfreenect sous Windows, première capture réelle, critères d'essai de
+      `docs/kinect-aero.md` (trous ≤ 10 %, répétabilité < 1 %, fx ±2 %), calibration Cd sur route.
 
 ## Commandes
 ```bash
 # Environnement
 uv sync --all-extras
 
-# Tests (261 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
+# Tests (295 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
 # storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML, UI helpers,
 # CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
@@ -265,6 +289,12 @@ python -m bikefit measure-setup video.mp4 --marker-size 100 --start 20 --end 70 
 # Spike Phase 0
 python scripts/spike_bikefit.py video.mp4 --side right
 
+# Aéro Kinect : capture puis comparaison de positions (1re = référence)
+python scripts/kinect_capture.py data/sources/aero/ref --duration 60
+python -m bikefit aero data/sources/aero/ref data/sources/aero/pads_bas --debug-dir data/outputs/debug
+# Calibration du Cd sur route (CdA Chung de la position de référence), écrite dans la fiche coureur
+python -m bikefit aero data/sources/aero/ref --cda-terrain 0.245 --write
+
 # UI Streamlit (Phase 4, MVP) — lancer une analyse depuis le navigateur
 uv run streamlit run src/bikefit/ui/app.py
 ```
@@ -304,6 +334,9 @@ Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR
 - Vidéos non versionnées (trop volumineuses) — dans `data/sources/`, gitignorées.
 - Marqueur ArUco de calibration : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal
   côté caméra. Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.
+- Kinect Xbox 360 (v1) + adaptateur secteur/USB — vue de face en profondeur (`aero/`). Portée utile
+  ~0,8-4 m, erreur de profondeur croissante avec z² (~1 cm à 2 m). Capteur IR : soleil direct et
+  tissus noirs/brillants -> trous de profondeur (mesurés par `hole_ratio`).
 - Marqueur ArUco BB (Phase 3A+) : `DICT_4X4_50 ID=1`, 100 mm, collé sur le boîtier de pédalier, déjà en
   place. Fichier prêt à imprimer : `docs/aruco_marker_id1_100mm.png`. Utilisé par `measure-setup` pour
   localiser le BB précisément (±5 mm visé) — validation ruban sur capture réelle encore à faire.

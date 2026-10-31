@@ -45,10 +45,24 @@ class ObjectifEpreuve(BaseModel):
     echeance: date | None = None
 
 
+class AeroCalibration(BaseModel):
+    """Calibration terrain du Cd (section `aero` de la fiche coureur), cf. bikefit.aero.drag.
+
+    Valable uniquement pour le montage de capture Kinect avec lequel `surface_ref_m2`
+    a été mesurée (même position caméra, même vélo, même home trainer).
+    """
+
+    cd: float | None = None
+    cda_terrain_m2: float | None = None  # CdA mesuré sur route (méthode Chung)
+    surface_ref_m2: float | None = None  # surface frontale Kinect de cette même position
+    source: str | None = None  # ex. "Chung 2027-03-12, 6 allers-retours"
+
+
 class RiderProfile(BaseModel):
     mensurations: Mensurations = Mensurations()
     profil: ProfilCoureur = ProfilCoureur()
     objectif: ObjectifEpreuve = ObjectifEpreuve()
+    aero: AeroCalibration = AeroCalibration()
 
     def saddle_height_geo_mm(self, longueur_manivelle_mm: float = 172.5) -> float | None:
         """Hauteur selle géométrique (BB → sommet selle) via formule LeMond.
@@ -77,6 +91,7 @@ def load_rider_profile(name: str = "mensurations") -> RiderProfile | None:
                 "mensurations": data.get("mensurations") or {},
                 "profil": data.get("profil") or {},
                 "objectif": data.get("objectif") or {},
+                "aero": data.get("aero") or {},
             }
         )
     return None
