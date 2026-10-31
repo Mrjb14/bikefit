@@ -25,3 +25,11 @@ objectif:
   distance_km: null
   duree_effort_min: null
   echeance: null          # AAAA-MM-JJ
+
+# Calibration aéro (Kinect, cf. docs/kinect-aero.md) : Cd = CdA terrain / surface Kinect.
+# `bikefit aero <enregistrement> --cda-terrain 0.245 --write` remplit les null.
+aero:
+  cd: null
+  cda_terrain_m2: null    # CdA mesuré sur route (méthode Chung), m²
+  surface_ref_m2: null    # surface frontale Kinect de la même position, m²
+  source: null            # ex. "Chung 2027-03-12, 6 allers-retours"
