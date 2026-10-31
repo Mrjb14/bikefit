@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -44,10 +46,21 @@ class SessionStore:
                     if "duplicate column name" not in str(exc):
                         raise
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Connexion transactionnelle ET fermée en sortie.
+
+        `with sqlite3.connect(...)` seul valide/annule la transaction mais ne ferme
+        pas la connexion : sous Windows (plateforme de dev principale), le fichier
+        .db reste alors verrouillé tant que le garbage collector ne passe pas.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def save(self, session: Session) -> Session:
         """Persiste une session et retourne la session avec son id assigné."""

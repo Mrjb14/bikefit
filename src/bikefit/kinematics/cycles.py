@@ -15,6 +15,13 @@ CYCLE_DURATION_TOLERANCE = 0.35
 # un vrai outlier d'une variation normale de cadence.
 MIN_CYCLES_FOR_PLAUSIBILITY_FILTER = 3
 
+# Un PMB doit dominer son voisinage d'au moins cette fraction de l'amplitude typique
+# du mouvement de la cheville (écart p95 - p5). Sans ce seuil, un petit rebond de
+# bruit au milieu d'un cycle était pris pour un PMB : le cycle réel était coupé en
+# deux demi-cycles, ensuite tous deux rejetés par le filtre de plausibilité — un
+# vrai cycle perdu pour chaque glitch.
+MIN_PROMINENCE_RATIO = 0.25
+
 
 def _filter_implausible_cycles(cycles: list[tuple[int, int]]) -> list[tuple[int, int]]:
     """Rejette les cycles dont la durée s'écarte trop de la médiane (faux PMB)."""
@@ -54,8 +61,12 @@ def detect_cycles(
 
     # distance minimale entre deux PMB : 60 rpm = 1 cycle/s → fps frames
     # distance maximale : 40 rpm = 1.5 s → 1.5 * fps frames
-    min_dist = int(fps * 0.4)  # 150 rpm max
-    pmb_indices, _ = find_peaks(ankle_y_interp, distance=min_dist)
+    min_dist = max(1, int(fps * 0.4))  # 150 rpm max
+    p5, p95 = np.percentile(ankle_y_interp, [5, 95])
+    prominence = MIN_PROMINENCE_RATIO * float(p95 - p5)
+    pmb_indices, _ = find_peaks(
+        ankle_y_interp, distance=min_dist, prominence=prominence if prominence > 0 else None
+    )
 
     if len(pmb_indices) < 2:
         return []

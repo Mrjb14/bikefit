@@ -1,11 +1,23 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+import math
+from typing import Any
+
+from pydantic import BaseModel, field_validator
 
 from bikefit.calibration.models import CalibrationResult
 
 
 class AngleStats(BaseModel):
+    """Statistiques d'une métrique agrégée sur N cycles.
+
+    `mean`/`std`/`min`/`max` valent NaN quand la métrique n'a pu être mesurée sur
+    aucun cycle (ex. coude masqué sur toute la vidéo). Pydantic sérialise NaN en
+    `null` (JSON strict) : le validateur ci-dessous refait le chemin inverse, sans
+    quoi une session contenant une métrique non mesurée deviendrait illisible
+    (et ferait planter `history`/`compare` sur toute la base).
+    """
+
     mean: float
     std: float
     min: float
@@ -18,9 +30,21 @@ class AngleStats(BaseModel):
     visibility: float | None = None
     frames_kept: float | None = None
 
+    @field_validator("mean", "std", "min", "max", mode="before")
+    @classmethod
+    def _none_to_nan(cls, v: Any) -> Any:
+        return math.nan if v is None else v
+
+    @property
+    def is_measured(self) -> bool:
+        """Faux si la métrique n'a été mesurée sur aucun cycle (valeurs NaN)."""
+        return not math.isnan(self.mean)
+
     @property
     def is_reliable(self) -> bool:
-        """Faux si la mesure repose majoritairement sur des points inférés."""
+        """Faux si la mesure repose majoritairement sur des points inférés, ou est absente."""
+        if not self.is_measured:
+            return False
         if self.visibility is None or self.frames_kept is None:
             return True
         return self.visibility >= 0.5 and self.frames_kept >= 0.5

@@ -43,6 +43,11 @@ with st.form("analyze_form"):
         front_video = st.file_uploader("Vidéo face", type=["mp4", "mov", "avi"])
         front_start_raw = st.text_input("Début face (s)", placeholder="ex. 8")
         front_end_raw = st.text_input("Fin face (s)", placeholder="ex. 65")
+        front_marker_raw = st.text_input(
+            "Marqueur ArUco face (mm, optionnel)",
+            placeholder="ex. 100",
+            help="Marqueur visible par la caméra de face, requis pour la largeur des coudes (mm).",
+        )
 
     st.subheader("Configuration")
     col_bike, col_rider, col_profile = st.columns(3)
@@ -67,6 +72,7 @@ if submitted:
         front_start_s = parse_optional_float(front_start_raw)
         front_end_s = parse_optional_float(front_end_raw)
         marker_size_mm = parse_optional_float(marker_size_raw)
+        front_marker_mm = parse_optional_float(front_marker_raw)
     except ValueError:
         st.error("Les champs numériques (début/fin/marqueur) doivent être des nombres.")
         st.stop()
@@ -96,6 +102,7 @@ if submitted:
                     profile=target_profile,
                     rider=rider,
                     marker_size=marker_size_mm,
+                    front_marker_size=front_marker_mm,
                     output=output_path,
                     report=report_path,
                     save_session=save_session,

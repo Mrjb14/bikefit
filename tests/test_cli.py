@@ -287,3 +287,123 @@ class TestCompare:
         store.save(_session(genou=145.0, video="autre.mp4"))
         result = runner.invoke(app, ["compare", "1", "2", "--db", str(db)])
         assert "position optimale" in result.output.lower()
+
+
+# ── analyze : robustesse de bout en bout (régressions de l'audit) ───────────────
+
+
+class _HiddenElbowEstimator(_FakeCliPoseEstimator):
+    """Coude droit (14) inféré sur toute la vidéo : l'angle du coude n'est jamais mesurable."""
+
+    def process(self, frame_bgr: np.ndarray, timestamp_ms: int, frame_idx: int) -> FrameLandmarks:
+        fl = super().process(frame_bgr, timestamp_ms, frame_idx)
+        fl.landmarks[14] = Landmark(
+            x=fl.landmarks[14].x, y=fl.landmarks[14].y, z=0.0, visibility=0.2
+        )
+        return fl
+
+
+def _run_analyze(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, estimator: type, *extra: str
+) -> tuple[object, dict]:
+    import json
+
+    video = tmp_path / "video.mp4"
+    _write_synthetic_video(video)
+    monkeypatch.setattr("bikefit.pose.MediaPipePoseEstimator", estimator)
+    monkeypatch.setattr("bikefit.pose.cache.CACHE_DIR", tmp_path / "cache")
+    out = tmp_path / "out.json"
+    result = runner.invoke(
+        app,
+        [
+            "analyze",
+            str(video),
+            "--output",
+            str(out),
+            "--report",
+            str(tmp_path / "r.html"),
+            "--bike",
+            "velo_de_test_inexistant",
+            *extra,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    def _reject(token: str) -> None:
+        raise AssertionError(f"JSON invalide : constante {token}")
+
+    data = json.loads(out.read_text(encoding="utf-8"), parse_constant=_reject)
+    return result, data
+
+
+class TestAnalyzeRobustness:
+    def test_unmeasured_metric_yields_strict_json_and_not_ok(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, data = _run_analyze(tmp_path, monkeypatch, _HiddenElbowEstimator)
+
+        assert data["metriques"]["coude"]["mean"] is None
+        assert "coude" in data["rapport"]["angles_non_mesures"]
+        assert "coude" not in data["rapport"]["angles_ok"]
+        html = (tmp_path / "r.html").read_text(encoding="utf-8")
+        assert "non mesuré" in html
+        assert "nan°" not in html
+
+    def test_front_width_never_uses_profile_scale(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """La largeur des coudes (vue de face) était convertie avec l'échelle mm/px de la
+        caméra de PROFIL. Sans calibration propre à la vue de face, elle doit rester absente."""
+        from bikefit.calibration.models import CalibrationResult
+
+        fake = CalibrationResult(mm_per_pixel=0.5, marker_size_mm=100, n_detected=10, n_sampled=10)
+        monkeypatch.setattr("bikefit.calibration.calibrate_from_video", lambda *a, **k: fake)
+        front = tmp_path / "front.mp4"
+        _write_synthetic_video(front)
+
+        _, data = _run_analyze(
+            tmp_path,
+            monkeypatch,
+            _FakeCliPoseEstimator,
+            "--marker-size",
+            "100",
+            "--front",
+            str(front),
+        )
+        assert data["metriques"]["calibration"]["mm_per_pixel"] == 0.5
+        assert data["metriques"]["largeur_coudes"] is None
+        assert data["metriques"]["genou_deviation_droit"] is not None
+
+    def test_front_width_uses_front_calibration(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from bikefit.calibration.models import CalibrationResult
+
+        fake = CalibrationResult(mm_per_pixel=0.5, marker_size_mm=100, n_detected=10, n_sampled=10)
+        monkeypatch.setattr("bikefit.calibration.calibrate_from_video", lambda *a, **k: fake)
+        front = tmp_path / "front.mp4"
+        _write_synthetic_video(front)
+
+        _, data = _run_analyze(
+            tmp_path,
+            monkeypatch,
+            _FakeCliPoseEstimator,
+            "--front",
+            str(front),
+            "--front-marker-size",
+            "100",
+        )
+        assert data["metriques"]["largeur_coudes"] is not None
+
+
+def test_warn_unreliable_handles_unmeasured_metric_without_visibility(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from bikefit.cli import _warn_unreliable
+
+    nan = float("nan")
+    metrics = _metrics().model_copy(
+        update={"coude": AngleStats(mean=nan, std=nan, min=nan, max=nan, n_cycles=0)}
+    )
+    _warn_unreliable(metrics)  # ne doit pas lever (visibility=None)
+    assert "non mesurée" in capsys.readouterr().err

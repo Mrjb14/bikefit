@@ -62,11 +62,20 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   `_same_source(a, b)` : compare deux sources (fichier résolu, ou chaîne exacte pour flux/webcam) —
   utilisé par le CLI pour interdire de lancer les vues profil et face sur la même caméra.
 - `pose/` : protocole `PoseEstimator` + `MediaPipePoseEstimator` (Tasks API, `pose_landmarker_heavy`) + `LandmarkCache` (Parquet).
+  `LandmarkCache.path_for(video)` / `invalidate(video)` : seule source du nom de fichier de cache
+  (utilisée par `--no-cache`, ne pas recalculer le chemin à la main).
 - `kinematics/` : `filter_landmarks` (Savitzky-Golay ~6 Hz), `detect_cycles` (extrema cheville y,
   renvoie des **`frame_idx`** — pas des positions de tableau, cf. découpage `--start/--end` — et
   rejette via `_filter_implausible_cycles` tout cycle dont la durée s'écarte de plus de 35% de la
   médiane, à partir de 3 cycles détectés),
   `compute_angles` (genou, hanche, tronc, coude, cheville — vectorisé NumPy), `aggregate_cycles` → `FitMetrics`.
+  `detect_cycles` exige aussi une proéminence ≥ 25 % de l'amplitude p5-p95 de la cheville
+  (`MIN_PROMINENCE_RATIO`) : un petit rebond de bruit ne coupe plus un vrai cycle en deux.
+  `aggregate_cycles` juge la validité d'un cycle **métrique par métrique** (≤ 10 % de NaN,
+  `MAX_NAN_RATIO_PER_CYCLE`) : un coude masqué ne fait pas perdre le genou. Une métrique sans aucun
+  cycle exploitable devient un `AngleStats` à NaN (`is_measured` faux, `is_reliable` faux) ; seul le
+  genou est obligatoire (ValueError sinon, rattrapée proprement par le CLI). NaN se sérialise en
+  `null` et un validateur refait `null` → NaN : les sessions restent relisibles.
   `visibility.py` : `VISIBILITY_THRESHOLD` (0.5), `reliability_mask`, `weakest_visibility` — filtre les
   points *inférés* par MediaPipe (cf. principe n°1). `compute_angles` / `compute_frontal_metrics`
   émettent aussi une colonne `<metrique>_vis` par frame, consommée par l'agrégation et le HUD de debug.
@@ -90,7 +99,14 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   6 réglages : `hauteur_selle`, `recul_selle`, `hauteur_prolongateurs`, `longueur_prolongateurs`,
   `cale_chaussure` (sagittal) et `largeur_pads` (frontal). Ce dernier compare la largeur de coudes
   à la largeur d'épaules (`largeur_coudes_ratio` dans targets) : il reste **silencieux** sans
-  calibration ArUco, sans mesure fiable, ou sans `largeur_epaules` renseignée.
+  calibration ArUco **de la caméra de face** (`--front-marker-size`), sans mesure fiable, ou sans
+  `largeur_epaules` renseignée.
+  Garde-fous : métrique non mesurée → `FitReport.angles_non_mesures` (jamais « OK » par défaut) ;
+  métrique peu fiable → direction conservée mais `delta_mm=None`, priorité faible, motif préfixé ;
+  deux règles sur un même réglage (hanche + tronc → `hauteur_prolongateurs`) → fusionnées par
+  `_merge_same_setting` (direction `arbitrer` si elles se contredisent) ; butée de hauteur de selle
+  vérifiée dans les deux sens. **Tronc** : angle / horizontale, grand = redressé → trop redressé =
+  *descendre* les pads (le sens était inversé avant l'audit d'octobre 2026).
 - `report/` : `render_html(metrics, report, angle_df, video_path, output_path)` — Jinja2 + Plotly CDN.
   Dark theme, 5 graphes d'angles empilés, schéma SVG du vélo de profil + schéma vue de face (Phase 3C,
   roue en tranche, cintre symétrique) avec annotations optionnelles si métriques plan frontal présentes.
@@ -102,7 +118,9 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   `DebugVideoWriter(measure_fps=True)` pour les sources live : le fps nominal du capteur n'est pas
   tenu quand l'inférence tourne en ligne (30 déclarés → ~20 réels = vidéo 1,5× trop rapide), donc le
   débit réel est mesuré sur les 2 premières secondes avant d'ouvrir le fichier.
-- `storage/` : `Session` (Pydantic) + `SessionStore` (SQLite natif `sqlite3`).
+- `storage/` : `Session` (Pydantic) + `SessionStore` (SQLite natif `sqlite3`). Chaque connexion est
+  fermée explicitement (`_connect` context manager) : `with sqlite3.connect()` seul ne ferme pas,
+  et laisse le fichier verrouillé sous Windows.
   Opérations : `save`, `get`, `list_all`, `latest`, `delete`. Tri par `date DESC, id DESC`.
 - `measure/` : bootstrap des YAML personnels (`config/rider/`, `config/bikes/`) depuis photo/vidéo.
   `estimate_body_measurements` (photo debout, MediaPipe IMAGE mode, world_landmarks 3D, mise à l'échelle
@@ -189,7 +207,7 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 # Environnement
 uv sync --all-extras
 
-# Tests (245 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
+# Tests (261 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
 # storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML, UI helpers,
 # CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
@@ -216,6 +234,9 @@ python -m bikefit data/sources/video.mp4 --side right --marker-size 100 --save-s
 python -m bikefit data/sources/video.mp4 --side right --front data/sources/video_face.mp4 \
   --start 20 --end 70 --front-start 20 --front-end 65
 python -m bikefit data/sources/video.mp4 --side right --front http://192.168.1.42/stream --front-duration 60
+# Largeur des coudes en mm : calibration sur la vidéo de FACE (jamais l'échelle de profil)
+python -m bikefit data/sources/video.mp4 --side right --front data/sources/video_face.mp4 \
+  --front-marker-size 100
 
 # Vue de profil et vue de face toutes les deux en webcam (deux périphériques distincts)
 python -m bikefit webcam:0 --side right --duration 60 --front webcam:1 --front-duration 60
