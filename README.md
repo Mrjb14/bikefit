@@ -170,6 +170,29 @@ trajectoire de la cheville (±20 mm, repli automatique) — pour en déduire `ha
 `hauteur_guidon_bb`, `reach_prolongateurs`. Validation au mètre ruban obligatoire avant usage
 (voir [`docs/procedure-mesures.md`](docs/procedure-mesures.md)).
 
+### `aero` — surface frontale à la Kinect (vue de face, profondeur)
+
+```
+python -m bikefit aero ENREGISTREMENT [ENREGISTREMENT...] [OPTIONS]
+
+Options:
+  --cda-terrain FLOAT  CdA mesuré sur route (méthode Chung) pour la 1re position -> calibre Cd
+  --write              Avec --cda-terrain : écrit la calibration dans la fiche coureur (section aero)
+  --cd FLOAT           Cd imposé (prioritaire sur la fiche)
+  --speed-kmh FLOAT    Vitesse de référence pour les watts (défaut: 36)
+  --distance-km FLOAT  Distance pour le temps gagné (défaut: 180)
+  --near-mm/--far-mm   Bande de profondeur du cycliste (défaut: auto, buste ±900 mm)
+  --no-floor           Ne pas retirer le sol
+  --start/--end FLOAT  Découpage (s)
+  --marker-size FLOAT  Vérifie fx au marqueur ArUco ID=0 visible dans rgb.mp4
+  --debug-dir PATH     Vidéo de contrôle de la segmentation, une par position
+  --output PATH        Résultats JSON
+```
+
+Surface frontale A (m²) moyennée par période de pédalage, avec part de trous de profondeur et
+significativité des écarts entre positions. Avec un Cd calibré sur route : CdA, watts et temps gagné.
+Capture : `scripts/kinect_capture.py`. Procédure complète : [docs/kinect-aero.md](docs/kinect-aero.md).
+
 ## Calibration ArUco (optionnelle)
 
 Colle un marqueur ArUco `DICT_4X4_50 ID=0` sur le cadre (tube de selle ou diagonal,
@@ -288,7 +311,8 @@ bikefit/
 │   ├── sources/                 # vidéos et photos d'entrée (seuls fichiers non regénérables)
 │   └── outputs/                 # reports/ · metrics/ · debug/ · annotated/ — tout le généré
 ├── scripts/
-│   └── spike_bikefit.py         # script autonome Phase 0
+│   ├── spike_bikefit.py         # script autonome Phase 0
+│   └── kinect_capture.py        # capture Kinect v1 (libfreenect) -> enregistrement de profondeur
 └── src/bikefit/
     ├── ingest/                  # VideoReader (fichier, flux MJPEG réseau ou webcam), TimedFrame
     ├── pose/                    # PoseEstimator (Protocol) + MediaPipe + LandmarkCache
@@ -301,7 +325,8 @@ bikefit/
     ├── measure/                 # Bootstrap YAML : mensurations (photo) + setup vélo (vidéo/ArUco) + annotation visuelle
     ├── debug/                   # Vidéo de debug annotée (squelette + HUD d'angles), toute source
     ├── ui/                      # UI Streamlit (Phase 4, MVP) — formulaire → cli.analyze → rapport
-    └── cli.py                   # Typer — analyze (--front, --debug-video) / history / compare / measure-*
+    ├── aero/                    # Kinect vue de face : surface frontale, Cd calibré, CdA, watts
+    └── cli.py                   # Typer — analyze / history / compare / measure-* / aero
 ```
 
 Les données runtime vivent **hors du dépôt**, dans `~/.bikefit/` : `models/` (modèle MediaPipe
@@ -310,10 +335,10 @@ téléchargé au premier lancement), `cache/landmarks/` (Parquet par vidéo) et 
 ## Tests
 
 ```bash
-python -m pytest        # 234 tests — angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité,
+python -m pytest        # 295 tests — angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité,
                          # ArUco (+ multi-marqueur), recommandations, storage, plan frontal,
                          # ingest MJPEG/webcam, measure/, report HTML, UI helpers, CLI,
-                         # vidéo de debug (données synthétiques)
+                         # vidéo de debug, aéro Kinect (scènes de profondeur synthétiques)
 uv run mypy src
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
@@ -327,6 +352,7 @@ révéler les bugs d'encodage console et de séparateurs de chemin. Couverture m
 - [Plan de développement & architecture](docs/plan-developpement.md)
 - [Procédure de prise de mesures](docs/procedure-mesures.md) — `measure-body` / `measure-setup` + validation au mètre ruban
 - [Dépannage](docs/depannage.md) — guide par symptôme (calibration, cache, ESP32-CAM, UI, CI...)
+- [Aéro à la Kinect](docs/kinect-aero.md) — installation, capture, calibration Cd sur route, critères d'essai
 - [CLAUDE.md](CLAUDE.md) — contexte pour Claude Code
 
 ## Statut
@@ -353,6 +379,9 @@ révéler les bugs d'encodage console et de séparateurs de chemin. Couverture m
 - [x] Phase 4 (MVP) — UI Streamlit (`src/bikefit/ui/`) : upload + formulaire → `cli.analyze` → rapport
       HTML affiché dans le navigateur. `measure-body`/`measure-setup`, historique et comparaison
       restent CLI-only pour l'instant.
+- [ ] Aéro Kinect (`aero/`, commande `aero`) — surface frontale par profondeur, Cd calibré sur route,
+      CdA/watts/temps, comparaison de positions *(implémenté et testé sur scènes synthétiques ;
+      capture réelle, installation libfreenect et calibration terrain encore à faire)*
 
 ## Fiabilité des mesures
 

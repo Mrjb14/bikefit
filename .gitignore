@@ -36,3 +36,7 @@ firmware/esp32cam_mjpeg/secrets.h
 
 # Logs
 *.log
+
+# Kinect SDK : binaires construits localement (tools/kinect_sdk/build.ps1)
+tools/kinect_sdk/*.exe
+tools/kinect_sdk/*.dll
