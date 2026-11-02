@@ -536,3 +536,29 @@ def test_check_intrinsics_end_to_end(tmp_path: Path) -> None:
     assert bad.area_error < -0.15  # fx surestimé de ~10 % -> surface sous-estimée de ~20 %
 
     assert check_intrinsics_with_marker(DepthRecording(tmp_path / "ok"), 100) is not None
+
+
+def test_read_sdk_packet_roundtrip_and_eof() -> None:
+    import importlib.util
+    import io
+    import struct
+
+    spec = importlib.util.spec_from_file_location(
+        "kinect_capture", Path(__file__).parent.parent / "scripts" / "kinect_capture.py"
+    )
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    depth = (np.arange(480 * 640) % 4000).astype("<u2").reshape(480, 640)
+    bgr = (np.arange(480 * 640 * 3) % 251).astype(np.uint8).reshape(480, 640, 3)
+    blob = b"KFRM" + struct.pack("<i", 1234) + depth.tobytes() + bgr.tobytes()
+
+    stamp, d, c = mod.read_sdk_packet(io.BytesIO(blob))
+    assert stamp == 1234
+    np.testing.assert_array_equal(d, depth)
+    np.testing.assert_array_equal(c, bgr)
+    assert mod.read_sdk_packet(io.BytesIO(blob[:1000])) is None  # flux coupé
+    assert mod.read_sdk_packet(io.BytesIO(b"")) is None
+    with pytest.raises(ValueError):
+        mod.read_sdk_packet(io.BytesIO(b"XXXX" + blob[4:]))

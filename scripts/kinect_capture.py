@@ -17,10 +17,13 @@ script — la logique de capture (`capture`) est testée avec une fausse source.
 from __future__ import annotations
 
 import argparse
+import struct
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 
@@ -82,6 +85,72 @@ def capture(
             writer.release()
 
 
+SDK_EXE = Path(__file__).resolve().parent.parent / "tools" / "kinect_sdk" / "kinect_grab.exe"
+_W, _H = 640, 480
+_PACKET_MAGIC = b"KFRM"
+
+
+def read_sdk_packet(stream: BinaryIO) -> tuple[int, np.ndarray, np.ndarray] | None:
+    """Lit un paquet de `kinect_grab.exe` : (timestamp_ms, profondeur mm, image BGR).
+
+    Format : "KFRM" | int32 timestamp | profondeur 640*480 uint16 | BGR 640*480*3.
+    Renvoie None si le flux est fermé (processus arrêté).
+    """
+
+    def read_exact(n: int) -> bytes | None:
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = stream.read(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return bytes(buf)
+
+    head = read_exact(8)
+    if head is None:
+        return None
+    if head[:4] != _PACKET_MAGIC:
+        raise ValueError("Flux kinect_grab corrompu (en-tête KFRM attendu).")
+    (stamp,) = struct.unpack("<i", head[4:])
+    depth_raw = read_exact(_W * _H * 2)
+    rgb_raw = read_exact(_W * _H * 3)
+    if depth_raw is None or rgb_raw is None:
+        return None
+    depth = np.frombuffer(depth_raw, dtype="<u2").reshape(_H, _W)
+    bgr = np.frombuffer(rgb_raw, dtype=np.uint8).reshape(_H, _W, 3)
+    return stamp, depth, bgr
+
+
+def _sdk_sources() -> tuple[DepthSource, RgbSource, Callable[[], None]]:
+    """Kinect SDK 1.8 via `tools/kinect_sdk/kinect_grab.exe` (cf. build.ps1)."""
+    if not SDK_EXE.exists():
+        sys.exit(f"{SDK_EXE} absent : lancer tools/kinect_sdk/build.ps1 (Kinect SDK 1.8 requis).")
+    proc = subprocess.Popen(
+        [str(SDK_EXE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None
+    )
+    assert proc.stdout is not None and proc.stdin is not None
+    latest: dict[str, np.ndarray] = {}
+
+    def read_depth() -> np.ndarray:
+        pkt = read_sdk_packet(proc.stdout)  # type: ignore[arg-type]
+        if pkt is None:
+            sys.exit("kinect_grab s'est arrêté : voir le message ci-dessus (alimentation, pilote).")
+        _, depth, latest["bgr"] = pkt
+        return depth.copy()
+
+    def read_rgb() -> np.ndarray:
+        return latest["bgr"].copy()
+
+    def stop() -> None:
+        proc.stdin.close()  # type: ignore[union-attr]
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    return read_depth, read_rgb, stop
+
+
 def _freenect_sources() -> tuple[DepthSource, RgbSource, Callable[[], None]]:
     try:
         import freenect  # type: ignore[import-not-found]
@@ -118,13 +187,20 @@ def main() -> None:
         default=5.0,
         help="Délai avant capture (s) pour se mettre en position",
     )
+    parser.add_argument(
+        "--driver",
+        choices=["auto", "sdk", "freenect"],
+        default="auto",
+        help="sdk = Kinect SDK 1.8 (kinect_grab.exe), freenect = libfreenect ; auto : sdk si build",
+    )
     parser.add_argument("--no-rgb", action="store_true", help="Ne pas enregistrer rgb.mp4")
     args = parser.parse_args()
 
     if (args.out_dir / "meta.json").exists():
         sys.exit(f"{args.out_dir} contient déjà un enregistrement : choisir un autre dossier.")
 
-    read_depth, read_rgb, stop = _freenect_sources()
+    use_sdk = args.driver == "sdk" or (args.driver == "auto" and SDK_EXE.exists())
+    read_depth, read_rgb, stop = _sdk_sources() if use_sdk else _freenect_sources()
     read_depth()  # réveille le capteur (premières frames souvent vides)
     for remaining in range(int(args.countdown), 0, -1):
         print(f"Capture dans {remaining} s... pédaler en position.", flush=True)

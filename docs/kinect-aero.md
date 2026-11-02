@@ -27,23 +27,30 @@ en Cd sans réduire A. Ce gain-là échappe à la Kinect.
   plat, pour vérifier les intrinsèques.
 - Pour la calibration Cd : un capteur de puissance sur le vélo, et un parcours route.
 
-## Installation (Windows) — à valider sur ta machine
+## Installation (Windows)
 
-Rien de ceci n'a encore été testé sur le matériel ; les étapes sont celles habituellement
-documentées pour libfreenect, à confirmer et corriger ici une fois faites.
+### Voie testée : Kinect SDK 1.8 (recommandée)
 
-1. Brancher la Kinect (adaptateur secteur + USB 2.0 de préférence).
-2. **Zadig** : installer le pilote libusb (WinUSB/libusbK) sur les périphériques
-   « Xbox NUI Motor », « Xbox NUI Camera » (et « Xbox NUI Audio » s'il apparaît).
-3. Compiler **libfreenect** (OpenKinect, CMake) avec la liaison Python
-   (`wrappers/python`, Cython) pour la version de Python du projet, et rendre le
-   module `freenect` importable depuis `uv run python`.
-4. Test rapide : `uv run python -c "import freenect; print(freenect.sync_get_depth())"`.
+Validée sur matériel réel (Kinect Xbox 360 + adaptateur secteur, Windows 11) : 30 fps,
+profondeur alignée sur la caméra couleur, ~78 % de pixels valides dans une pièce.
 
-Alternative si la compilation coince : Kinect SDK 1.8 de Microsoft (accepte la Kinect
-Xbox 360 pour du développement) avec un petit exécutable C++ qui écrit le même format
-(`depth/000000.png` 16 bits en mm alignée sur la couleur + `meta.json`) — le pipeline
-ne dépend que du format, pas du pilote. Voir `bikefit.aero.recording`.
+1. Installer le **Kinect SDK 1.8** de Microsoft (il accepte la Kinect Xbox 360 pour le
+   développement) ; la variable `KINECTSDK10_DIR` doit exister.
+2. Brancher la Kinect (adaptateur secteur + USB 2.0).
+3. Construire l'outil de capture (compilateur C# de .NET Framework, pas de Visual Studio) :
+   `powershell -File tools/kinect_sdk/build.ps1`
+4. Capturer : `uv run python scripts/kinect_capture.py data/sources/aero/test --duration 20`
+   (`--driver auto` choisit le SDK dès que `kinect_grab.exe` existe).
+
+`tools/kinect_sdk/KinectGrab.cs` lit profondeur + couleur, aligne la profondeur sur la
+couleur (`MapColorFrameToDepthFrame`) et pousse des paquets binaires que
+`kinect_capture.py` écrit au format `bikefit.aero.recording`.
+
+### Voie alternative : libfreenect (non testée)
+
+Zadig (pilote libusb sur « Xbox NUI Motor/Camera »), compilation de libfreenect + liaison
+Python `freenect`, puis `--driver freenect`. Remplace le pilote Microsoft : incompatible
+avec la voie SDK sur la même machine.
 
 ## Installation physique
 
