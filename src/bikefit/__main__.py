@@ -9,7 +9,15 @@ Permet d'appeler :
 
 import sys
 
-_SUBCOMMANDS = {"analyze", "history", "compare", "measure-body", "measure-setup"}
+from bikefit.cli import app
+
+
+def subcommand_names() -> set[str]:
+    """Noms réels des commandes Typer (jamais une liste à tenir à jour à la main)."""
+    return {
+        cmd.name or (cmd.callback.__name__.replace("_", "-") if cmd.callback else "")
+        for cmd in app.registered_commands
+    }
 
 
 def _inject_default_command() -> None:
@@ -20,12 +28,10 @@ def _inject_default_command() -> None:
     first = args[0]
     # Si le premier argument n'est pas un sous-commande connu ni une option,
     # c'est sûrement un chemin vidéo → on préfixe avec "analyze".
-    if not first.startswith("-") and first not in _SUBCOMMANDS:
+    if not first.startswith("-") and first not in subcommand_names():
         sys.argv.insert(1, "analyze")
 
 
-_inject_default_command()
-
-from bikefit.cli import app  # noqa: E402
-
-app()
+if __name__ == "__main__":
+    _inject_default_command()
+    app()

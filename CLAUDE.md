@@ -23,10 +23,11 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
 - `docs/aruco_marker_100mm.png` : marqueur ArUco de calibration à imprimer (DICT_4X4_50 ID=0, 100 mm).
 - `docs/aruco_marker_id1_100mm.png` : marqueur ArUco BB à imprimer (DICT_4X4_50 ID=1, 100 mm, Phase 3A+).
 - `firmware/README.md` : installation du firmware ESP32-CAM (flux MJPEG, vue de face Phase 3C).
-- `docs/kinect-aero.md` : aéro à la Kinect Xbox 360 — installation libfreenect, placement, protocole,
-  vérification fx au marqueur, calibration du Cd sur route (méthode Chung), critères d'essai.
-- `scripts/kinect_capture.py` : capture Kinect v1 (libfreenect, DEPTH_REGISTERED) -> enregistrement de
-  profondeur. Logique `capture()` testée avec une fausse source ; **jamais lancé sur le matériel**.
+- `docs/kinect-aero.md` : aéro à la Kinect Xbox 360 — installation (SDK 1.8, testée), placement,
+  moteur d'inclinaison, séances, vérification fx au marqueur, calibration du Cd sur route (Chung).
+- `scripts/kinect_capture.py` : enveloppe CLI de `bikefit.aero.capture` (capture brute -> enregistrement
+  de profondeur). Pilote par défaut : Kinect SDK 1.8 via `tools/kinect_sdk/KinectGrab.cs` (compilé avec
+  `build.ps1`, sans Visual Studio) ; libfreenect en alternative non testée. **Testé sur matériel réel**.
 - `docs/depannage.md` : guide de dépannage par symptôme (calibration ArUco, cache landmarks,
   ESP32-CAM/webcam, UI Streamlit, environnement `uv run`, CI Windows).
 - `data/` : données locales, **entièrement gitignoré**. Séparation stricte entrées/sorties :
@@ -160,9 +161,23 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
   `intrinsics.py` : fx estimé au marqueur ArUco (taille_px · z / taille_mm). `render.py` : vidéo de
   contrôle (vert compté, rouge trou bouché). Cd calibré stocké dans la fiche coureur
   (`RiderProfile.aero` : `cd`, `cda_terrain_m2`, `surface_ref_m2`, `source`), valable pour CE montage.
-- `cli.py` : Typer — 6 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`,
+- `cli.py` : Typer — 7 commandes : `analyze` (défaut), `history`, `compare`, `measure-body`, `measure-setup`, `seance`,
   `aero` (surface frontale Kinect, `--cda-terrain/--write` pour calibrer Cd, `--debug-dir`).
   `__main__.py` injecte `analyze` si le premier argument n'est pas un sous-commande.
+- `aero/capture.py` : `capture()` (écrit un enregistrement), `sdk_sources_with_motor()` (SDK 1.8 : profondeur
+  alignée sur la couleur + moteur d'inclinaison, commande `TILT <deg>` sur le stdin de `kinect_grab.exe`),
+  `freenect_sources()`. `RGB_NOMINAL_FPS` : rgb.mp4 est écrit à 30 fps nominal, le fps réel est dans
+  `meta.json` (convertir les temps : t_rgb = t_reel × fps_reel / 30).
+- `seance.py` (`bikefit seance`) : séance d'entraînement en une commande. Briques pures testées :
+  `pedaling_window` (plus longue suite de cycles, tolère un cycle rejeté), `preflight_depth` (distance,
+  centrage, silhouette, sol, trous), `tilt_correction_deg`/`auto_tilt` (moteur : horizontale puis
+  centrage vertical du cycliste, ±15 max), `LiveVideoRecorder`/`ProfileRecorder` (caméra de profil, fps
+  mesuré), `AeroReference` (`~/.bikefit/aero_reference.json`, avec l'inclinaison). `run_seance` : compte à
+  rebours + vérif du cadrage, capture simultanée Kinect (+ profil), UNE détection de fenêtre de pédalage
+  appliquée aux deux capteurs (repli : marges fixes bornées), aéro vs référence, angles via `cli.analyze`.
+  `run_seance_series` (`--every-min N --times K`) : une capture de 60 s toutes les N min, puis dérive de la
+  surface au cours de la sortie. Cartes de profondeur brutes supprimées (~0,5 Go/min, `--keep-raw`).
+  **Toute sortie console doit être encodable en cp1252** (pas de `═`, `─`, `→`) : test dédié.
 - `ui/` (Phase 4, MVP) : app Streamlit locale pour lancer `analyze` depuis le navigateur au lieu du CLI —
   upload vidéo(s) profil/face, formulaire (côté, découpage, marqueur ArUco, vélo/coureur/profil cible),
   rapport HTML + recommandations affichés en fin de traitement. Réutilise `cli.analyze` directement
@@ -221,17 +236,17 @@ recommande des réglages chiffrés en mm (selle, prolongateurs, poste de pilotag
       `cli.analyze` directement, aucune logique dupliquée. `measure-body`/`measure-setup`, l'historique
       des sessions et la comparaison restent CLI-only pour l'instant — hors scope du MVP, à évaluer selon
       l'usage réel de l'UI.
-- [ ] Aéro Kinect (`aero/`, `bikefit aero`) : implémenté et testé sur scènes de profondeur synthétiques
-      (aire connue, indépendance à la distance, trous IR, sol, trous d'air, période, CLI). **Reste à
-      faire** : installer libfreenect sous Windows, première capture réelle, critères d'essai de
-      `docs/kinect-aero.md` (trous ≤ 10 %, répétabilité < 1 %, fx ±2 %), calibration Cd sur route.
+- [ ] Aéro Kinect (`aero/`, `bikefit aero`, `bikefit seance`) : testé sur scènes synthétiques ET sur matériel
+      réel (capture SDK 1.8 à 30 fps, profondeur alignée sur la couleur, moteur d'inclinaison, segmentation
+      d'un corps). **Reste à faire** : critères d'essai sur un cycliste en pédalage (trous ≤ 10 %,
+      répétabilité < 1 %, fx ±2 %), séance complète avec caméra de profil, calibration Cd sur route.
 
 ## Commandes
 ```bash
 # Environnement
 uv sync --all-extras
 
-# Tests (295 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
+# Tests (327 tests : angles, filtre SG, cycles (+ plausibilité), visibilité/fiabilité, ArUco (+ multi-marqueur), recommandations,
 # storage, plan frontal, ingest MJPEG/webcam, measure/, report HTML, UI helpers,
 # CLI (dont pipeline complet + vidéo de debug via faux PoseEstimator))
 python -m pytest
@@ -289,6 +304,11 @@ python -m bikefit measure-setup video.mp4 --marker-size 100 --start 20 --end 70 
 # Spike Phase 0
 python scripts/spike_bikefit.py video.mp4 --side right
 
+# Séance d'entraînement (Kinect, moteur auto, fenêtre de pédalage auto) ; + caméra de profil optionnelle
+python -m bikefit seance --set-reference                     # 1re capture = position de référence
+python -m bikefit seance --every-min 20 --times 5            # longue sortie : dérive de la position
+python -m bikefit seance --profile-source webcam:0 --side right
+
 # Aéro Kinect : capture puis comparaison de positions (1re = référence)
 python scripts/kinect_capture.py data/sources/aero/ref --duration 60
 python -m bikefit aero data/sources/aero/ref data/sources/aero/pads_bas --debug-dir data/outputs/debug
@@ -334,7 +354,8 @@ Ces chemins sont définis dans `src/bikefit/_paths.py` (`MODELS_DIR`, `CACHE_DIR
 - Vidéos non versionnées (trop volumineuses) — dans `data/sources/`, gitignorées.
 - Marqueur ArUco de calibration : `DICT_4X4_50 ID=0`, 100 mm de côté, collé sur tube de selle/diagonal
   côté caméra. Fichier prêt à imprimer : `docs/aruco_marker_100mm.png`.
-- Kinect Xbox 360 (v1) + adaptateur secteur/USB — vue de face en profondeur (`aero/`). Portée utile
+- Kinect Xbox 360 (v1) + adaptateur secteur/USB — vue de face en profondeur (`aero/`), moteur d'inclinaison
+  ±27° (le capteur peut rester en butée haute : `seance` le remet à l'horizontale). Portée utile
   ~0,8-4 m, erreur de profondeur croissante avec z² (~1 cm à 2 m). Capteur IR : soleil direct et
   tissus noirs/brillants -> trous de profondeur (mesurés par `hole_ratio`).
 - Marqueur ArUco BB (Phase 3A+) : `DICT_4X4_50 ID=1`, 100 mm, collé sur le boîtier de pédalier, déjà en

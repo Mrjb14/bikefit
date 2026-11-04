@@ -145,3 +145,32 @@ hors 0,45-1,10 est signalé comme suspect.
   encoche dans la vidéo de contrôle.
 - La cadence est détectée sur la surface elle-même (autocorrélation) ; sans période
   nette, moyenne sur des fenêtres d'1 s (signalé).
+
+
+## Séance d'entraînement : `bikefit seance`
+
+Une commande remplace capture + découpage + analyse :
+
+```bash
+python -m bikefit seance --set-reference                # 1re fois : position de référence
+python -m bikefit seance                                # séances suivantes : A vs référence
+python -m bikefit seance --every-min 20 --times 5       # longue sortie : dérive de la position
+python -m bikefit seance --profile-source webcam:0      # + angles de profil (caméra de profil)
+```
+
+Déroulé : la Kinect se remet à l'**horizontale** (moteur), compte à rebours pendant lequel
+tu te mets en position et pédales, **centrage automatique** (le moteur incline la Kinect pour
+centrer le cycliste, ±15° max), vérification du cadrage (distance 1,2-3,2 m, cycliste centré,
+silhouette entière, sol visible), capture, **détection automatique du pédalage** (pas de
+`--start/--end`), surface frontale, comparaison à la référence, résumé en quelques lignes.
+Une fenêtre en direct (couleur | profondeur, avec « REC t / durée ») s'ouvre pendant le cadrage
+et chaque capture, pour vérifier à l'œil que tout tourne (`--no-preview` pour la couper). Un cadrage
+refusé s'explique ; `--force` capture quand même, `--no-auto-tilt` coupe le moteur.
+
+Longue sortie : les cartes de profondeur pèsent ~0,5 Go/min, donc pas de capture continue.
+`--every-min` fait une fenêtre de 60 s toutes les N minutes et affiche à la fin la dérive de la
+surface (une hausse significative = tu te redresses ou écartes les coudes avec la fatigue).
+
+Inclinaison : la surface projetée dépend légèrement de l'angle de la Kinect (cos θ). L'angle est
+enregistré avec la référence ; `seance` avertit s'il diffère de plus de 3°.
+Sans Cd calibré (cf. plus haut) : surfaces et écarts relatifs, pas de watts.

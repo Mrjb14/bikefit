@@ -15,6 +15,8 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 # — surchargeable par BIKEFIT_SOURCES_DIR, en cohérence avec BIKEFIT_OUTPUTS_DIR
 # ci-dessous (les deux sont indépendants : ne pas dériver l'un de l'autre).
 SOURCES_DIR = Path(os.environ.get("BIKEFIT_SOURCES_DIR", "data/sources"))
+# Séances d'entraînement (`bikefit seance`) : une sous-dossier horodaté par séance.
+SEANCES_DIR = SOURCES_DIR / "seances"
 
 # Sorties d'analyse : rapports, métriques, vidéos de debug, images annotées.
 # Séparées des sources (data/sources/) pour qu'une analyse n'écrive jamais à côté
@@ -23,3 +25,6 @@ SOURCES_DIR = Path(os.environ.get("BIKEFIT_SOURCES_DIR", "data/sources"))
 OUTPUTS_DIR = Path(os.environ.get("BIKEFIT_OUTPUTS_DIR", "data/outputs"))
 REPORTS_DIR = OUTPUTS_DIR / "reports"
 ANNOTATED_DIR = OUTPUTS_DIR / "annotated"
+
+# Position aéro de référence (surface frontale) comparée à chaque séance.
+AERO_REFERENCE_FILE = _USER_DATA / "aero_reference.json"

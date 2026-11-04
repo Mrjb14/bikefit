@@ -279,6 +279,18 @@ Deux comportements selon la source, documentés pour éviter toute confusion :
   calculés **frame par frame, bruts** (sans lissage, qui nécessite l'ensemble de la capture) — normal
   de les voir plus "nerveux" que sur un rapport final.
 
+## Séance d'entraînement avec la Kinect (`seance`)
+
+Une commande pour une séance home trainer : la Kinect se règle toute seule (moteur d'inclinaison),
+vérifie le cadrage, capture, détecte le pédalage, mesure la surface frontale (aéro) et la compare à
+ta position de référence. Longue sortie : `--every-min 20 --times 5` pour voir la dérive de la
+position avec la fatigue. Détails : [`docs/kinect-aero.md`](docs/kinect-aero.md).
+
+```bash
+python -m bikefit seance --set-reference     # position de référence
+python -m bikefit seance --every-min 20 --times 5
+```
+
 ## Interface web (Streamlit, Phase 4 — MVP)
 
 Alternative au CLI pour lancer une analyse depuis le navigateur : upload vidéo(s), formulaire de
