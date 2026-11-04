@@ -6,6 +6,7 @@
 // Tout est little-endian. Les messages (état, erreurs) vont sur stderr.
 // Build : tools/kinect_sdk/build.ps1
 using System;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using Microsoft.Kinect;
@@ -45,7 +46,24 @@ static class KinectGrab
         sensor.Start();
         Console.Error.WriteLine("Kinect démarrée (" + sensor.UniqueKinectId + ").");
         // Tourne jusqu'à ce que Python ferme stdin ou tue le processus.
-        try { while (Console.In.Read() >= 0) { } } catch { }
+        // Commandes sur stdin : "TILT <degrés>" incline le moteur (borné au débattement du
+        // capteur). Fermeture de stdin = arrêt. Le moteur est lent : ne pas enchaîner les ordres.
+        try
+        {
+            string line;
+            while ((line = Console.In.ReadLine()) != null)
+            {
+                int deg;
+                if (line.StartsWith("TILT ") && int.TryParse(line.Substring(5).Trim(),
+                    NumberStyles.Integer, CultureInfo.InvariantCulture, out deg))
+                {
+                    deg = Math.Max(sensor.MinElevationAngle, Math.Min(sensor.MaxElevationAngle, deg));
+                    try { sensor.ElevationAngle = deg; Console.Error.WriteLine("Moteur : inclinaison " + deg + " deg"); }
+                    catch (Exception ex) { Console.Error.WriteLine("Moteur : " + ex.Message); }
+                }
+            }
+        }
+        catch { }
         lock (gate) { sensor.AllFramesReady -= OnFrames; }
         sensor.Stop();
         return 0;

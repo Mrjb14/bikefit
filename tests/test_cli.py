@@ -139,6 +139,23 @@ class TestAnalyzeValidation:
         assert "même source" not in result.output.lower()
 
 
+# ── python -m bikefit : injection de `analyze` par défaut ─────────────────────
+
+
+def test_every_registered_command_is_known_to_the_default_injection() -> None:
+    from bikefit.__main__ import subcommand_names
+
+    assert {
+        "analyze",
+        "history",
+        "compare",
+        "aero",
+        "seance",
+        "measure-body",
+        "measure-setup",
+    } <= subcommand_names()
+
+
 # ── measure-setup --bb-px : parsing pur, sans pipeline vidéo ───────────────────
 
 

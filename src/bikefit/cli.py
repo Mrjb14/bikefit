@@ -864,6 +864,110 @@ def aero(
         typer.echo(f"\nRésultats -> {output}")
 
 
+@app.command()
+def seance(
+    duration: Annotated[float, typer.Option(help="Durée de capture (s)")] = 60.0,
+    countdown: Annotated[
+        float,
+        typer.Option(help="Compte à rebours (s) : mise en position + vérification du cadrage"),
+    ] = 10.0,
+    profile_source: Annotated[
+        str | None,
+        typer.Option(
+            "--profile-source",
+            help="Caméra de profil : webcam:N ou flux MJPEG http://... Sans elle : Kinect seule"
+            " (aéro uniquement).",
+        ),
+    ] = None,
+    side: Annotated[
+        str, typer.Option(help="right | left — côté filmé par la caméra de profil")
+    ] = "right",
+    bike: Annotated[str, typer.Option(help="Fiche vélo dans config/bikes/")] = "giant_trinity_2019",
+    rider: Annotated[
+        str, typer.Option(help="Fiche coureur dans config/rider/ (sans .yaml)")
+    ] = "mensurations",
+    target: Annotated[
+        str, typer.Option(help="Profil cible : triathlon_XL | clm_long | clm_court")
+    ] = "triathlon_XL",
+    driver: Annotated[
+        str, typer.Option(help="Pilote Kinect : auto | sdk (SDK 1.8) | freenect")
+    ] = "auto",
+    set_reference: Annotated[
+        bool,
+        typer.Option(help="Enregistre la surface frontale de cette séance comme référence aéro"),
+    ] = False,
+    keep_raw: Annotated[
+        bool, typer.Option(help="Garde les cartes de profondeur brutes (~0,5 Go/min)")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option(help="Capture même si la vérification du cadrage échoue")
+    ] = False,
+    speed_kmh: Annotated[float, typer.Option(help="Vitesse de référence aéro (km/h)")] = 36.0,
+    distance_km: Annotated[float, typer.Option(help="Distance pour le temps gagné (km)")] = 180.0,
+    auto_tilt: Annotated[
+        bool,
+        typer.Option(
+            "--auto-tilt/--no-auto-tilt",
+            help="Moteur de la Kinect : horizontale puis centrage du cycliste (pilote SDK)",
+        ),
+    ] = True,
+    tilt: Annotated[
+        float, typer.Option(help="Inclinaison de départ du moteur en degrés (+ = vers le haut)")
+    ] = 0.0,
+    every_min: Annotated[
+        float | None,
+        typer.Option(
+            "--every-min",
+            help="Longue sortie : une capture de --duration s toutes les N minutes (avec --times)",
+        ),
+    ] = None,
+    times: Annotated[int, typer.Option(help="Nombre de captures avec --every-min")] = 1,
+) -> None:
+    """Séance en une commande : capture Kinect + profil, angles, aéro vs référence."""
+    from bikefit.seance import SeanceOptions, run_seance
+
+    if side not in ("right", "left"):
+        typer.echo("Erreur : --side doit être 'right' ou 'left'", err=True)
+        raise typer.Exit(1)
+    if driver not in ("auto", "sdk", "freenect"):
+        typer.echo("Erreur : --driver doit être auto, sdk ou freenect", err=True)
+        raise typer.Exit(1)
+    options = SeanceOptions(
+        duration_s=duration,
+        countdown_s=countdown,
+        profile_source=profile_source,
+        side=side,
+        bike=bike,
+        rider=rider,
+        target=target,
+        driver=driver,
+        set_reference=set_reference,
+        keep_raw=keep_raw,
+        force=force,
+        auto_tilt=auto_tilt,
+        tilt_deg=tilt,
+        speed_kmh=speed_kmh,
+        distance_km=distance_km,
+    )
+    if every_min is not None:
+        if every_min * 60 <= duration + countdown:
+            typer.echo("Erreur : --every-min doit dépasser la durée d'une capture.", err=True)
+            raise typer.Exit(1)
+        from bikefit.seance import run_seance_series
+
+        series = run_seance_series(options, every_min, times, echo=typer.echo)
+        if not any(r is not None for r in series):
+            raise typer.Exit(1)
+        return
+    try:
+        result = run_seance(options, echo=typer.echo)
+    except (RuntimeError, FileNotFoundError) as exc:
+        typer.echo(f"Erreur : {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        raise typer.Exit(1)
+
+
 @app.command("measure-body")
 def measure_body(
     photo: Annotated[Path, typer.Argument(help="Photo debout du coureur (jpg/png)")],
