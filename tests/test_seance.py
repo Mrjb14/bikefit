@@ -16,6 +16,7 @@ from bikefit.ingest.reader import TimedFrame
 from bikefit.seance import (
     TILT_LIMIT_DEG,
     KinectSources,
+    LivePreview,
     LiveVideoRecorder,
     ProfileRecorder,
     SeanceOptions,
@@ -23,6 +24,7 @@ from bikefit.seance import (
     load_reference,
     pedaling_window,
     preflight_depth,
+    preview_image,
     run_seance,
     run_seance_series,
     save_reference,
@@ -464,3 +466,59 @@ def test_every_printed_line_is_encodable_on_a_windows_console(tmp_path: Path) ->
     assert logs
     for line in logs:
         line.encode("cp1252")  # lève UnicodeEncodeError au moindre caractère non supporté
+
+
+# ── Aperçu en direct ──────────────────────────────────────────────────────────
+
+
+class _RecordingPreview(LivePreview):
+    def __init__(self) -> None:
+        super().__init__()
+        self.labels: list[str] = []
+        self.closed = False
+        self.had_depth = False
+
+    def show(self, depth: np.ndarray | None, bgr: np.ndarray, label: str) -> None:
+        self.labels.append(label)
+        self.had_depth = self.had_depth or depth is not None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_preview_image_layout_and_missing_depth() -> None:
+    bgr = np.full((480, 640, 3), 90, np.uint8)
+    depth = np.full((480, 640), 2500, np.uint16)
+    depth[:, :100] = 0  # pas de mesure -> noir
+    panel = preview_image(depth, bgr, "REC 3 / 15 s")
+    assert panel.shape == (480, 1280, 3) and panel.dtype == np.uint8
+    assert panel[300, 640 + 50].tolist() == [0, 0, 0]  # zone sans mesure
+    assert panel[300, 640 + 300].any()  # profondeur colorée
+    assert preview_image(None, bgr, "x").shape == (480, 1280, 3)  # sans profondeur
+
+
+def test_seance_feeds_the_preview_during_countdown_and_capture(tmp_path: Path) -> None:
+    preview = _RecordingPreview()
+    result = run_seance(
+        _opts(tmp_path),
+        echo=lambda _: None,
+        kinect=_fake_kinect(_rider(z=2500.0)),
+        window_fn=lambda v, s: (0.2, 2.0, 7),
+        preview=preview,
+    )
+    assert result is not None
+    assert any(label.startswith("Compte a rebours") for label in preview.labels)
+    assert any(label.startswith("REC ") and "/ 2 s" in label for label in preview.labels)
+    assert preview.had_depth and preview.closed
+
+
+def test_live_preview_disables_itself_when_display_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(*args: object, **kwargs: object) -> None:
+        raise cv2.error("pas d'interface graphique")
+
+    monkeypatch.setattr(cv2, "imshow", broken)
+    preview = LivePreview()
+    bgr = np.zeros((480, 640, 3), np.uint8)
+    preview.show(None, bgr, "x")  # ne lève pas
+    assert preview.enabled is False
+    preview.show(None, bgr, "x")  # et reste silencieux ensuite

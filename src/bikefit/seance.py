@@ -243,6 +243,52 @@ _FPS_MEASURE_S = 2.0
 _MAX_PENDING_BYTES = 300 * 1024 * 1024
 
 
+PREVIEW_DEPTH_RANGE_MM = (500.0, 4000.0)
+
+
+def preview_image(depth: np.ndarray | None, bgr: np.ndarray, label: str) -> np.ndarray:
+    """Image couleur | profondeur (fausses couleurs, noir = pas de mesure) + une ligne de texte."""
+    h, w = bgr.shape[:2]
+    if depth is None:
+        depth_view = np.zeros_like(bgr)
+    else:
+        lo, hi = PREVIEW_DEPTH_RANGE_MM
+        scaled = np.clip((depth.astype(np.float32) - lo) / (hi - lo), 0, 1) * 255
+        depth_view = cv2.applyColorMap(scaled.astype(np.uint8), cv2.COLORMAP_JET)
+        depth_view[depth == 0] = 0
+        if depth_view.shape[:2] != (h, w):
+            depth_view = cv2.resize(depth_view, (w, h))
+    panel = np.hstack([bgr, depth_view])
+    cv2.rectangle(panel, (0, 0), (panel.shape[1], 34), (0, 0, 0), -1)
+    cv2.putText(panel, label, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    return panel
+
+
+class LivePreview:
+    """Fenêtre de contrôle en direct (cv2.imshow) : se désactive seule si l'affichage échoue."""
+
+    WINDOW = "BikeFit seance (couleur | profondeur)"
+
+    def __init__(self) -> None:
+        self.enabled = True
+
+    def show(self, depth: np.ndarray | None, bgr: np.ndarray, label: str) -> None:
+        if not self.enabled:
+            return
+        try:
+            cv2.imshow(self.WINDOW, preview_image(depth, bgr, label))
+            cv2.waitKey(1)
+        except cv2.error:  # OpenCV sans interface graphique : on continue sans aperçu
+            self.enabled = False
+
+    def close(self) -> None:
+        try:
+            cv2.destroyWindow(self.WINDOW)
+            cv2.waitKey(1)
+        except cv2.error:
+            pass
+
+
 class LiveVideoRecorder:
     """Écrit une source live en MP4 au fps réellement obtenu, pas au fps annoncé.
 
@@ -387,6 +433,7 @@ class SeanceOptions:
     set_reference: bool = False
     keep_raw: bool = False
     force: bool = False
+    preview: bool = False  # fenêtre de contrôle en direct (activée par le CLI)
     auto_tilt: bool = True  # moteur : horizontale puis centrage du cycliste (SDK uniquement)
     tilt_deg: float = 0.0  # inclinaison de départ
     speed_kmh: float = 36.0
@@ -421,6 +468,7 @@ def _countdown_and_preflight(
     echo: Echo,
     clock: Callable[[], float] = time.monotonic,
     refine: Callable[[], None] | None = None,
+    on_frame: Callable[[float], None] | None = None,
 ) -> Preflight:
     """Vide le flux Kinect pendant le compte à rebours, puis juge le cadrage."""
     recent: deque[np.ndarray] = deque(maxlen=15)
@@ -429,6 +477,8 @@ def _countdown_and_preflight(
     echo("Mets-toi en position et pédale : vérification du cadrage pendant le compte à rebours.")
     while (remaining := t_end - clock()) > 0:
         recent.append(read_depth())
+        if on_frame is not None:
+            on_frame(remaining)
         if int(remaining) != last_shown:
             last_shown = int(remaining)
             echo(f"  Capture dans {last_shown + 1} s...")
@@ -447,6 +497,7 @@ def run_seance(
     profile_frames: Callable[[], Iterator[TimedFrame]] | None = None,
     window_fn: Callable[[Path, str], tuple[float, float, int] | None] | None = None,
     set_tilt: TiltSetter | None = None,
+    preview: LivePreview | None = None,
 ) -> SeanceResult | None:
     """Une séance complète. None si interrompue (cadrage refusé, caméra muette)."""
     from bikefit.aero import analyze_frontal_area
@@ -477,6 +528,23 @@ def run_seance(
             if opts.auto_tilt:
                 echo("Moteur d'inclinaison : disponible avec le pilote SDK uniquement.")
     read_depth, read_rgb, stop_kinect = kinect
+    if preview is None and opts.preview:
+        preview = LivePreview()
+    show_label = ["Kinect"]
+    if preview is not None:
+        raw_depth, raw_rgb, shown = read_depth, read_rgb, preview
+        last_depth: list[np.ndarray | None] = [None]
+
+        def read_depth() -> np.ndarray:
+            depth = raw_depth()
+            last_depth[0] = depth
+            return depth
+
+        def read_rgb() -> np.ndarray:
+            bgr = raw_rgb()
+            shown.show(last_depth[0], bgr, show_label[0])
+            return bgr
+
     tilt = [opts.tilt_deg if set_tilt is not None and opts.auto_tilt else None]
 
     if opts.profile_source is not None and profile_frames is None:
@@ -500,7 +568,19 @@ def run_seance(
                     read_depth, set_tilt, tilt[0] or 0.0, KINECT_V1_REGISTERED, echo
                 )
 
-        pre = _countdown_and_preflight(read_depth, opts, KINECT_V1_REGISTERED, echo, refine=refine)
+        def on_countdown_frame(remaining: float) -> None:
+            show_label[0] = f"Compte a rebours {remaining:.0f} s - cadre-toi, pedale"
+            if preview is not None:
+                read_rgb()
+
+        pre = _countdown_and_preflight(
+            read_depth,
+            opts,
+            KINECT_V1_REGISTERED,
+            echo,
+            refine=refine,
+            on_frame=on_countdown_frame,
+        )
         for w in pre.warnings:
             echo(f"  Attention : {w}")
         if not pre.ok:
@@ -521,15 +601,24 @@ def run_seance(
                 return None
 
         echo(f"Capture de {opts.duration_s:.0f} s en cours... pédale normalement.")
+        capture_start = time.monotonic()
+
+        def read_rgb_recording() -> np.ndarray:
+            elapsed = time.monotonic() - capture_start
+            show_label[0] = f"REC {elapsed:.0f} / {opts.duration_s:.0f} s"
+            return read_rgb()
+
         rec = capture(
             folder / "kinect",
             read_depth,
-            read_rgb,
+            read_rgb_recording,
             opts.duration_s,
             on_progress=lambda n, t: echo(f"  {t:5.0f} s") if n % 150 == 0 else None,
         )
     finally:
         stop_kinect()
+        if preview is not None:
+            preview.close()
         if profile_rec is not None:
             profile_rec.join(timeout=15)
     if profile_rec is not None and profile_rec.error:

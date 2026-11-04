@@ -904,6 +904,13 @@ def seance(
     ] = False,
     speed_kmh: Annotated[float, typer.Option(help="Vitesse de référence aéro (km/h)")] = 36.0,
     distance_km: Annotated[float, typer.Option(help="Distance pour le temps gagné (km)")] = 180.0,
+    preview: Annotated[
+        bool,
+        typer.Option(
+            "--preview/--no-preview",
+            help="Fenêtre en direct (couleur | profondeur) pendant le cadrage et la capture",
+        ),
+    ] = True,
     auto_tilt: Annotated[
         bool,
         typer.Option(
@@ -944,6 +951,7 @@ def seance(
         set_reference=set_reference,
         keep_raw=keep_raw,
         force=force,
+        preview=preview,
         auto_tilt=auto_tilt,
         tilt_deg=tilt,
         speed_kmh=speed_kmh,

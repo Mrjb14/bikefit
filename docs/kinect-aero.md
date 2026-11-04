@@ -163,7 +163,9 @@ tu te mets en position et pédales, **centrage automatique** (le moteur incline 
 centrer le cycliste, ±15° max), vérification du cadrage (distance 1,2-3,2 m, cycliste centré,
 silhouette entière, sol visible), capture, **détection automatique du pédalage** (pas de
 `--start/--end`), surface frontale, comparaison à la référence, résumé en quelques lignes.
-Un cadrage refusé s'explique ; `--force` capture quand même, `--no-auto-tilt` coupe le moteur.
+Une fenêtre en direct (couleur | profondeur, avec « REC t / durée ») s'ouvre pendant le cadrage
+et chaque capture, pour vérifier à l'œil que tout tourne (`--no-preview` pour la couper). Un cadrage
+refusé s'explique ; `--force` capture quand même, `--no-auto-tilt` coupe le moteur.
 
 Longue sortie : les cartes de profondeur pèsent ~0,5 Go/min, donc pas de capture continue.
 `--every-min` fait une fenêtre de 60 s toutes les N minutes et affiche à la fin la dérive de la
