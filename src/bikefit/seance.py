@@ -404,6 +404,7 @@ class SeanceResult(BaseModel):
     aero_delta_pct: float | None = None
     aero_significant: bool | None = None
     tilt_deg: float | None = None
+    reference_saved: bool = False
     cda_m2: float | None = None
     power_w: float | None = None
     session_id: int | None = None
@@ -604,6 +605,7 @@ def run_seance(
                 )
         if opts.set_reference:
             save_reference(opts.reference_file, f"séance {stamp}", aero, tilt[0])
+            result.reference_saved = True
             echo(f"  Position de référence enregistrée -> {opts.reference_file}")
 
     # ── Angles de profil + vue de face (MediaPipe) ─────────────────────────────
@@ -786,6 +788,8 @@ def _print_summary(result: SeanceResult, opts: SeanceOptions, has_cd: bool, echo
         if result.aero_delta_pct is not None:
             verdict = "significatif" if result.aero_significant else "dans le bruit de mesure"
             echo(f"  vs référence : {result.aero_delta_pct:+.1f} % ({verdict})")
+        elif result.reference_saved:
+            echo("  Référence enregistrée : les prochaines séances seront comparées à celle-ci.")
         else:
             echo("  Pas de référence : relancer avec --set-reference sur ta meilleure position.")
         if not has_cd:

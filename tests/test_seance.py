@@ -222,6 +222,9 @@ def test_full_seance_kinect_only_then_compare_to_reference(tmp_path: Path) -> No
     assert first.window_s == pytest.approx((0.5 * 30 / fps, 2.0 * 30 / fps))
     assert first.aero.mean_m2 == pytest.approx(0.55, rel=0.05)  # 0,5 × 1,1 m
     assert (tmp_path / "ref.json").exists()
+    assert first.reference_saved
+    assert not any("Pas de référence" in line for line in logs)
+    assert any("Référence enregistrée :" in line for line in logs)
     folder = Path(first.folder)
     assert (folder / "seance.json").exists()
     assert (folder / "segmentation.mp4").exists()
